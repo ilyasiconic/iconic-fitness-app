@@ -26,8 +26,8 @@ export const ThemeContext = createContext<ThemeContextValue | null>(null);
 
 export function ThemeProvider({ children }: { children: React.ReactNode }) {
   const device = useDeviceColorScheme();
-  // Default is dark — the brand experience. Users can switch to light (or
-  // follow the device) from Appearance settings; their choice is persisted.
+  // Brand default is always the black theme. Users can explicitly switch to
+  // light (or follow the device) from Appearance settings.
   const [mode, setModeState] = useState<ThemeMode>("dark");
 
   // Restore the saved preference on first mount.

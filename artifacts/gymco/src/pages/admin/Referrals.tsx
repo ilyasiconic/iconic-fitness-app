@@ -12,6 +12,10 @@ export default function AdminReferrals() {
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [bonusPoints, setBonusPoints] = useState<number | null>(null);
+  const [bonusSaving, setBonusSaving] = useState(false);
+  const [bonusMessage, setBonusMessage] = useState<string | null>(null);
+  const [bonusError, setBonusError] = useState<string | null>(null);
 
   useEffect(() => {
     adminApi.referrals
@@ -19,7 +23,30 @@ export default function AdminReferrals() {
       .then(setSettings)
       .catch(() => setError("Could not load referral settings"))
       .finally(() => setLoading(false));
+    adminApi.signupBonus
+      .get()
+      .then((r) => setBonusPoints(r.points))
+      .catch(() => setBonusError("Could not load the welcome bonus setting"));
   }, []);
+
+  const saveBonus = async (e: FormEvent) => {
+    e.preventDefault();
+    if (bonusPoints === null) return;
+    setBonusSaving(true);
+    setBonusMessage(null);
+    setBonusError(null);
+    try {
+      const saved = await adminApi.signupBonus.set(bonusPoints);
+      setBonusPoints(saved.points);
+      setBonusMessage("Welcome bonus saved");
+    } catch (err) {
+      setBonusError(
+        err instanceof Error ? err.message : "Could not save the welcome bonus",
+      );
+    } finally {
+      setBonusSaving(false);
+    }
+  };
 
   const save = async (e: FormEvent) => {
     e.preventDefault();
@@ -157,6 +184,62 @@ export default function AdminReferrals() {
               >
                 <Save className="h-4 w-4" />
                 {saving ? "Saving…" : "Save settings"}
+              </button>
+            </form>
+          )}
+        </AdminCard>
+
+        <AdminCard className="p-6 mt-6">
+          <div className="mb-5">
+            <h2 className="text-base font-semibold text-white">
+              Welcome bonus (new app installs)
+            </h2>
+            <p className="mt-1 text-sm text-slate-400">
+              Points credited automatically the first time a new member signs
+              up in the app or website (1 point = ₹1). They can redeem these on
+              store orders, membership packages, and PT plans. Set 0 to turn
+              the bonus off.
+            </p>
+          </div>
+          {bonusPoints === null ? (
+            <div className="text-sm text-slate-500 py-2">
+              {bonusError ?? "Loading…"}
+            </div>
+          ) : (
+            <form onSubmit={saveBonus} className="space-y-4">
+              <div>
+                <label className="block text-sm text-slate-300 mb-1.5">
+                  Bonus points per new member
+                </label>
+                <input
+                  type="number"
+                  min={0}
+                  max={100000}
+                  value={bonusPoints}
+                  onChange={(e) =>
+                    setBonusPoints(Math.max(0, Number(e.target.value) || 0))
+                  }
+                  className={inputCls}
+                />
+                <p className="text-xs text-slate-500 mt-1.5">
+                  {bonusPoints > 0
+                    ? `Every new member starts with ${bonusPoints} points (₹${bonusPoints}) in their wallet.`
+                    : "Welcome bonus is off — new members start with 0 points."}
+                </p>
+              </div>
+              {bonusMessage && (
+                <div className="text-sm text-lime-400">{bonusMessage}</div>
+              )}
+              {bonusError && bonusPoints !== null && (
+                <div className="text-sm text-red-400">{bonusError}</div>
+              )}
+              <button
+                type="submit"
+                disabled={bonusSaving}
+                className="inline-flex items-center gap-2 rounded-lg bg-lime-500 px-4 py-2 text-sm font-semibold text-slate-950 hover:bg-lime-400 disabled:opacity-60"
+              >
+                <Save className="h-4 w-4" />
+                {bonusSaving ? "Saving…" : "Save welcome bonus"}
               </button>
             </form>
           )}

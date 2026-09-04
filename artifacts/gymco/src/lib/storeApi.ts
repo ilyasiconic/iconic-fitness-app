@@ -86,7 +86,17 @@ export const storeApi = {
     items: { productId: number; qty: number; size?: string; color?: string }[];
     redeemPoints?: number;
   }) =>
-    req<{ ok: true; orderId: number; total: number; redeemedInr?: number }>("/store/checkout", {
+    req<{
+      ok: true;
+      orderId: number;
+      total: number;
+      redeemedInr?: number;
+      subtotalInr?: number;
+      cgstInr?: number;
+      sgstInr?: number;
+      shippingInr?: number;
+      paymentUrl: string;
+    }>("/store/checkout", {
       method: "POST",
       body: JSON.stringify(body),
     }),

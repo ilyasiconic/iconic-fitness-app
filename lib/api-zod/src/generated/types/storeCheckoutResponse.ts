@@ -11,4 +11,10 @@ export interface StoreCheckoutResponse {
   orderId: number;
   total: number;
   redeemedInr: number;
+  subtotalInr?: number;
+  cgstInr?: number;
+  sgstInr?: number;
+  shippingInr?: number;
+  /** Open in the system browser to pay (Airpay hosted page) */
+  paymentUrl: string;
 }

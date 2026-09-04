@@ -31,7 +31,11 @@ import { fetchPtAssignmentMap } from "../lib/ptAssignments";
 import { trainerPhotoMap } from "../lib/trainerPhotos";
 import { PT_TOTAL_SESSIONS, listPtSessions } from "../lib/ptSessions";
 import { requireUser } from "../lib/currentUser";
-import { creditReferralRewardOnce } from "../lib/referrals";
+import {
+  creditReferralRewardOnce,
+  debitWallet,
+  walletBalance,
+} from "../lib/referrals";
 import {
   applyPackagePref,
   isPackageVisible,
@@ -365,7 +369,22 @@ router.post(
       couponCode = quote.code!;
       couponDiscountInr = quote.discountInr!;
     }
-    const chargeInr = listPrice - couponDiscountInr;
+    let chargeInr = listPrice - couponDiscountInr;
+
+    // Optional wallet points redemption (coupon first, keep at least ₹1
+    // payable — the hosted payment page needs a real charge). Points are
+    // only quoted here; the actual debit settles at paid-flip (idempotent).
+    let pointsRedeemedInr = 0;
+    const requestedPoints = Math.floor(Number(body.redeemPoints ?? 0));
+    if (requestedPoints > 0) {
+      const balance = await walletBalance(req.userId!);
+      pointsRedeemedInr = Math.min(
+        requestedPoints,
+        balance,
+        Math.max(chargeInr - 1, 0),
+      );
+      chargeInr -= pointsRedeemedInr;
+    }
 
     const token = randomBytes(24).toString("hex");
     const [booking] = await db
@@ -386,6 +405,7 @@ router.post(
         couponId,
         couponCode,
         couponDiscountInr,
+        pointsRedeemedInr,
         // Snapshot for the staff PT dashboard auto-enrol once payment lands.
         sessions: pkg.sessions ?? 0,
         durationDays: durationToDays(pkg.duration),
@@ -841,7 +861,9 @@ function landingHtml(ok: boolean): string {
 <body style="margin:0;font-family:system-ui,sans-serif;background:#0A0C08;color:#fff;display:flex;align-items:center;justify-content:center;min-height:100vh;text-align:center">
 <div style="padding:32px;max-width:360px"><div style="font-size:48px">${ok ? "✓" : "✕"}</div>
 <h1 style="color:${accent};font-size:22px;margin:12px 0">${title}</h1>
-<p style="color:#aaa;font-size:15px;line-height:1.5">${msg}</p></div></body></html>`;
+<p style="color:#aaa;font-size:15px;line-height:1.5">${msg}</p>
+<a href="iconic-app://" style="display:inline-block;margin-top:20px;padding:14px 28px;border-radius:999px;background:${accent};color:#0A0C08;font-weight:700;text-decoration:none">Back to the app</a></div>
+<script>setTimeout(function(){window.location.href="iconic-app://";},600);</script></body></html>`;
 }
 
 router.get(
@@ -879,7 +901,28 @@ router.get(
             mobile: flipped.mobile,
           });
         }
-        await creditReferralRewardOnce(flipped.userId, flipped.amountInr);
+        // Settle the wallet points quoted at booking time (idempotent via
+        // the (refType, refId) unique index — a landing reload can't double
+        // debit; debit clamps to the current balance).
+        if (flipped.pointsRedeemedInr > 0 && (flipped.userId ?? 0) > 0) {
+          try {
+            await debitWallet({
+              userId: flipped.userId!,
+              amountInr: flipped.pointsRedeemedInr,
+              label: `PT plan #${flipped.id} — points redeemed`,
+              refType: "pt_redeem",
+              refId: String(flipped.id),
+            });
+          } catch (err) {
+            console.error("[pt] points settlement failed:", err);
+          }
+        }
+        // Reward is based on what the member actually spent in value terms
+        // (paid amount + redeemed points).
+        await creditReferralRewardOnce(
+          flipped.userId,
+          flipped.amountInr + (flipped.pointsRedeemedInr ?? 0),
+        );
         await autoEnrolPtMembership(flipped);
       }
     }

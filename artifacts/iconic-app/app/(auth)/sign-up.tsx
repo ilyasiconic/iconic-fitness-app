@@ -1,4 +1,5 @@
 import { useSignUp, useSSO } from "@clerk/expo";
+import { useSignInWithApple } from "@clerk/expo/apple";
 import * as AuthSession from "expo-auth-session";
 import { Link, useRouter } from "expo-router";
 import * as WebBrowser from "expo-web-browser";
@@ -15,10 +16,13 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { AppText } from "@/components/AppText";
+import { AppleSsoButton } from "@/components/AppleSsoButton";
 import { Button } from "@/components/Button";
 import { Field } from "@/components/Field";
 import { useColors } from "@/hooks/useColors";
 import { useGuest } from "@/hooks/useGuest";
+import { setPendingUsername } from "@/lib/pendingUsername";
+import { customFetch } from "@workspace/api-client-react";
 
 WebBrowser.maybeCompleteAuthSession();
 
@@ -28,15 +32,17 @@ export default function SignUpScreen() {
   const insets = useSafeAreaInsets();
   const { signUp, fetchStatus } = useSignUp();
   const { startSSOFlow } = useSSO();
+  const { startAppleAuthenticationFlow } = useSignInWithApple();
   const { exitGuest } = useGuest();
 
   const [stage, setStage] = useState<"form" | "verify">("form");
   const [name, setName] = useState("");
+  const [username, setUsername] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [code, setCode] = useState("");
   const [error, setError] = useState<string | null>(null);
-  const [googleLoading, setGoogleLoading] = useState(false);
+  const [ssoLoading, setSsoLoading] = useState<"google" | "apple" | null>(null);
 
   useEffect(() => {
     if (Platform.OS !== "android") return;
@@ -48,7 +54,26 @@ export default function SignUpScreen() {
 
   const onCreate = useCallback(async () => {
     setError(null);
+    const normalizedUsername = username.trim().toLowerCase();
+    if (!/^[a-z][a-z0-9._]{2,29}$/.test(normalizedUsername)) {
+      setError(
+        "Username must be 3–30 characters, start with a letter, and use only letters, numbers, dots, or underscores.",
+      );
+      return;
+    }
     try {
+      const availability = await customFetch<{ available: boolean }>(
+        "/api/auth/username-availability",
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ username: normalizedUsername }),
+        },
+      );
+      if (!availability.available) {
+        setError("That username is already taken.");
+        return;
+      }
       const { error: signUpError } = await signUp.password({
         emailAddress: email.trim(),
         password,
@@ -62,13 +87,17 @@ export default function SignUpScreen() {
     } catch (err: unknown) {
       setError(clerkError(err));
     }
-  }, [signUp, email, password]);
+  }, [signUp, username, email, password]);
 
   const onVerify = useCallback(async () => {
     setError(null);
     try {
       await signUp.verifications.verifyEmailCode({ code: code.trim() });
       if (signUp.status === "complete") {
+        const normalizedUsername = username.trim().toLowerCase();
+        if (signUp.createdUserId && normalizedUsername) {
+          await setPendingUsername(normalizedUsername, signUp.createdUserId);
+        }
         if (name.trim()) {
           try {
             await signUp.update({ firstName: name.trim() });
@@ -84,30 +113,92 @@ export default function SignUpScreen() {
     } catch (err: unknown) {
       setError(clerkError(err));
     }
-  }, [signUp, code, name, router]);
+  }, [signUp, code, username, name, router, exitGuest]);
 
   const onGoogle = useCallback(async () => {
-    if (googleLoading) return;
+    if (ssoLoading) return;
     setError(null);
-    setGoogleLoading(true);
+    setSsoLoading("google");
     try {
-      const { createdSessionId, setActive } = await startSSOFlow({
+      if (signUp.status !== null) {
+        await signUp.reset();
+      }
+      const {
+        createdSessionId,
+        setActive,
+        signUp: ssoSignUp,
+        authSessionResult,
+      } = await startSSOFlow({
         strategy: "oauth_google",
         redirectUrl: AuthSession.makeRedirectUri(),
       });
-      if (createdSessionId && setActive) {
+      let sessionId = createdSessionId;
+      if (
+        !sessionId &&
+        ssoSignUp &&
+        ssoSignUp.status === "missing_requirements" &&
+        (ssoSignUp.missingFields?.length ?? 0) === 0
+      ) {
+        const result = await ssoSignUp.update({});
+        if (result.status === "complete") {
+          sessionId = result.createdSessionId;
+        }
+      }
+      if (sessionId && setActive) {
         exitGuest();
-        await setActive({
-          session: createdSessionId,
-          navigate: () => router.replace("/(tabs)"),
-        });
+        await setActive({ session: sessionId });
+        router.replace("/(tabs)");
+      } else if (
+        authSessionResult?.type !== "cancel" &&
+        authSessionResult?.type !== "dismiss"
+      ) {
+        setError(
+          "Google sign-in could not finish. Please try again, or create an account with your email.",
+        );
       }
     } catch (err: unknown) {
       setError(clerkError(err));
     } finally {
-      setGoogleLoading(false);
+      setSsoLoading(null);
     }
-  }, [googleLoading, startSSOFlow, router]);
+  }, [ssoLoading, signUp, startSSOFlow, router, exitGuest]);
+
+  const onApple = useCallback(async () => {
+    if (ssoLoading) return;
+    setError(null);
+    setSsoLoading("apple");
+    try {
+      const { createdSessionId, setActive, signUp: appleSignUp } =
+        await startAppleAuthenticationFlow();
+      let sessionId = createdSessionId;
+      if (
+        !sessionId &&
+        appleSignUp &&
+        appleSignUp.status === "missing_requirements" &&
+        (appleSignUp.missingFields?.length ?? 0) === 0
+      ) {
+        const result = await appleSignUp.update({});
+        if (result.status === "complete") sessionId = result.createdSessionId;
+      }
+      if (!sessionId || !setActive) {
+        if (appleSignUp?.status === "missing_requirements") {
+          setError(
+            "Apple sign-in needs additional account details. Please create your account with email first.",
+          );
+        }
+        return;
+      }
+      exitGuest();
+      await setActive({
+        session: sessionId,
+        navigate: () => router.replace("/(tabs)"),
+      });
+    } catch (err: unknown) {
+      if (!isAppleCancellation(err)) setError(clerkError(err));
+    } finally {
+      setSsoLoading(null);
+    }
+  }, [ssoLoading, startAppleAuthenticationFlow, router, exitGuest]);
 
   return (
     <KeyboardAvoidingView
@@ -146,6 +237,14 @@ export default function SignUpScreen() {
                 onChangeText={setName}
                 placeholder="Your name"
                 autoCapitalize="words"
+              />
+              <Field
+                label="Username"
+                value={username}
+                onChangeText={setUsername}
+                placeholder="e.g. iconic.member"
+                autoCapitalize="none"
+                autoComplete="username-new"
               />
               <Field
                 label="Email"
@@ -195,9 +294,19 @@ export default function SignUpScreen() {
                 onPress={onGoogle}
                 variant="secondary"
                 icon="chrome"
-                loading={googleLoading}
+                loading={ssoLoading === "google"}
+                disabled={ssoLoading !== null}
                 size="lg"
               />
+
+              {Platform.OS === "ios" ? (
+                <AppleSsoButton
+                  onPress={onApple}
+                  loading={ssoLoading === "apple"}
+                  disabled={ssoLoading !== null}
+                  tone="light"
+                />
+              ) : null}
             </View>
 
             <View style={styles.footer}>
@@ -273,6 +382,15 @@ function clerkError(err: unknown): string {
     e?.errors?.[0]?.message ??
     e?.message ??
     "Something went wrong. Please try again."
+  );
+}
+
+function isAppleCancellation(err: unknown): boolean {
+  return (
+    typeof err === "object" &&
+    err !== null &&
+    "code" in err &&
+    err.code === "ERR_REQUEST_CANCELED"
   );
 }
 

@@ -14,10 +14,20 @@
       "backgroundColor": "#0A0C08"
     },
     "ios": {
-      "supportsTablet": false
+      "supportsTablet": false,
+      "bundleIdentifier": "com.iconicfitness.app",
+      "usesAppleSignIn": true,
+      "config": {
+        "usesNonExemptEncryption": false
+      }
     },
     "android": {
-      "package": "com.iconicfitness.app",
+      "package": "com.iconicfitness",
+      "blockedPermissions": [
+        "android.permission.READ_MEDIA_IMAGES",
+        "android.permission.READ_MEDIA_VIDEO",
+        "android.permission.READ_EXTERNAL_STORAGE"
+      ],
       "adaptiveIcon": {
         "foregroundImage": "./assets/images/adaptive-icon-safe.png",
         "backgroundColor": "#000000"
@@ -58,6 +68,7 @@
         }
       ],
       "@clerk/expo",
+      "expo-apple-authentication",
       [
         "expo-build-properties",
         {

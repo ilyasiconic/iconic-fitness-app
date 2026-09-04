@@ -1,7 +1,7 @@
 import "@/lib/silenceExpoGoPushWarning";
 
 import { ClerkProvider, useAuth } from "@clerk/expo";
-import { Text, View } from "react-native";
+import { Pressable, Text, View } from "react-native";
 import { tokenCache } from "@clerk/expo/token-cache";
 import {
   Inter_400Regular,
@@ -10,33 +10,84 @@ import {
   Inter_700Bold,
   useFonts,
 } from "@expo-google-fonts/inter";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { QueryClient } from "@tanstack/react-query";
+import { PersistQueryClientProvider } from "@tanstack/react-query-persist-client";
+import { createAsyncStoragePersister } from "@tanstack/query-async-storage-persister";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import { setAuthTokenGetter, setBaseUrl } from "@workspace/api-client-react";
 import { Stack } from "expo-router";
 import * as Notifications from "expo-notifications";
 import { ensureDefaultReminders } from "@/lib/notifications";
 import * as SplashScreen from "expo-splash-screen";
 import { StatusBar } from "expo-status-bar";
-import React, { useEffect, useState } from "react";
+import React, { useCallback, useEffect, useState } from "react";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 
 import { AnimatedSplash } from "@/components/AnimatedSplash";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { PendingMobileLink } from "@/components/PendingMobileLink";
+import { PendingUsernameLink } from "@/components/PendingUsernameLink";
 import { useColors } from "@/hooks/useColors";
 import { GuestProvider } from "@/hooks/useGuest";
+import { AuthClientResetContext } from "@/hooks/useAuthClientReset";
 import { ThemeProvider, useTheme } from "@/hooks/useTheme";
 
 SplashScreen.preventAutoHideAsync();
 
-const queryClient = new QueryClient();
+// Cache-first data loading: screens render instantly from the last known data
+// (persisted to device storage across app launches) while a background refetch
+// keeps things fresh. staleTime avoids refetch storms when hopping between tabs.
+const queryClient = new QueryClient({
+  defaultOptions: {
+    queries: {
+      staleTime: 60 * 1000,
+      gcTime: 24 * 60 * 60 * 1000,
+      retry: 1,
+    },
+  },
+});
+
+const queryPersister = createAsyncStoragePersister({
+  storage: AsyncStorage,
+  key: "iconic-query-cache",
+  throttleTime: 2000,
+});
+
+// Only PUBLIC catalog-style content is ever written to device storage —
+// anything personal (profile, orders, bookings, notifications, wallet…)
+// stays in memory only, so nothing private can leak to the next person
+// who opens the app on a shared phone.
+const PUBLIC_PERSIST_PREFIXES = [
+  "/api/gyms",
+  "/api/classes",
+  "/api/trainers",
+  "/api/memberships",
+  "/api/package-categories",
+  "/api/membership-packages",
+  "/api/store/products",
+  "/api/store/categories",
+  "/api/home-slides",
+  "/api/faq",
+  "/api/links",
+];
+
+function isPublicPersistableQuery(query: { queryKey: readonly unknown[] }): boolean {
+  const first = query.queryKey[0];
+  return (
+    typeof first === "string" &&
+    PUBLIC_PERSIST_PREFIXES.some(
+      (p) => first === p || first.startsWith(`${p}/`) || first.startsWith(`${p}?`),
+    )
+  );
+}
 
 // Point generated API hooks at the remote GYMCO backend (same domain, /api).
 // EAS cloud builds don't set EXPO_PUBLIC_DOMAIN, so fall back to the published
 // production domain — never an old/stale deployment.
 const domain = process.env.EXPO_PUBLIC_DOMAIN ?? "iconicfitnessindia.com";
-setBaseUrl(`https://${domain}`);
+const apiBaseUrl = `https://${domain}`;
+setBaseUrl(apiBaseUrl);
 
 Notifications.setNotificationHandler({
   handleNotification: async () => ({
@@ -47,14 +98,10 @@ Notifications.setNotificationHandler({
   }),
 });
 
-// EAS cloud builds don't set EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY, which used to
-// leave APKs without a login key ("not able to login"). Fall back to the same
-// publishable key the published website uses (publishable keys are public by
-// design — they are visible in any web bundle).
-const publishableKey =
-  process.env.EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY ||
-  "pk_test_ZXhjaXRlZC10ZXJyaWVyLTc0LmNsZXJrLmFjY291bnRzLmRldiQ";
-const proxyUrl = process.env.EXPO_PUBLIC_CLERK_PROXY_URL || undefined;
+type AuthConfig = {
+  publishableKey: string;
+  proxyUrl?: string;
+};
 
 // Supply the Clerk session token as a bearer to every generated API call,
 // at the root so all routes (tabs + root-level modals) are covered.
@@ -165,6 +212,60 @@ export default function RootLayout() {
     Inter_700Bold,
   });
   const [splashDone, setSplashDone] = useState(false);
+  const [authConfig, setAuthConfig] = useState<AuthConfig | null>(null);
+  const [authConfigFailed, setAuthConfigFailed] = useState(false);
+  const [authConfigRetry, setAuthConfigRetry] = useState(0);
+  const [authClientKey, setAuthClientKey] = useState(0);
+  const resetAuthClient = useCallback(() => {
+    setAuthClientKey((current) => current + 1);
+  }, []);
+
+  useEffect(() => {
+    let active = true;
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 10000);
+    setAuthConfigFailed(false);
+
+    void fetch(`${apiBaseUrl}/api/auth/config`, {
+      headers: { Accept: "application/json" },
+      signal: controller.signal,
+    })
+      .then(async (response) => {
+        if (!response.ok) {
+          throw new Error(`Auth config request failed: ${response.status}`);
+        }
+        const config = (await response.json()) as {
+          publishableKey?: unknown;
+          proxyPath?: unknown;
+        };
+        if (
+          typeof config.publishableKey !== "string" ||
+          !config.publishableKey
+        ) {
+          throw new Error("Auth config did not include a publishable key");
+        }
+        const proxyPath =
+          typeof config.proxyPath === "string" ? config.proxyPath : "";
+        if (active) {
+          setAuthConfig({
+            publishableKey: config.publishableKey,
+            proxyUrl: proxyPath ? `${apiBaseUrl}${proxyPath}` : undefined,
+          });
+          setAuthConfigFailed(false);
+        }
+      })
+      .catch(() => {
+        if (active) {
+          setAuthConfigFailed(true);
+        }
+      });
+
+    return () => {
+      active = false;
+      clearTimeout(timeout);
+      controller.abort();
+    };
+  }, [authConfigRetry]);
 
   // Hide the native splash as soon as fonts resolve — but NEVER wait on them
   // forever. If the font download stalls (slow device / blocked tunnel), a 2s
@@ -191,10 +292,10 @@ export default function RootLayout() {
     void ensureDefaultReminders();
   }, []);
 
-  // A build without the Clerk key must not hard-crash at launch ("app opens
-  // then instantly closes"). Show a readable message instead so the problem
-  // is obvious on a real device.
-  if (!publishableKey) {
+  // A build without a usable Clerk configuration must not hard-crash. EAS
+  // builds obtain it from the API above because they do not inherit Replit
+  // deployment environment variables.
+  if (!authConfig) {
     return (
       <View
         style={{
@@ -213,7 +314,9 @@ export default function RootLayout() {
             textAlign: "center",
           }}
         >
-          App build is missing its login key
+          {authConfigFailed
+            ? "Could not connect to login"
+            : "Connecting to secure login…"}
         </Text>
         <Text
           style={{
@@ -223,9 +326,33 @@ export default function RootLayout() {
             marginTop: 8,
           }}
         >
-          Add EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY as an environment variable in
-          the Expo build settings and rebuild the app.
+          {authConfigFailed
+            ? "Check your internet connection, close the app, and open it again."
+            : "Please wait a moment."}
         </Text>
+        {authConfigFailed ? (
+          <Pressable
+            accessibilityRole="button"
+            onPress={() => setAuthConfigRetry((attempt) => attempt + 1)}
+            style={{
+              marginTop: 20,
+              borderRadius: 12,
+              backgroundColor: "#0BE607",
+              paddingHorizontal: 24,
+              paddingVertical: 12,
+            }}
+          >
+            <Text
+              style={{
+                color: "#071006",
+                fontSize: 15,
+                fontWeight: "700",
+              }}
+            >
+              Try again
+            </Text>
+          </Pressable>
+        ) : null}
       </View>
     );
   }
@@ -241,29 +368,45 @@ export default function RootLayout() {
     // request on a real device traps the user on a blank screen after the splash
     // (and even blocks guests from reaching "Continue without login"). Instead we
     // always render the app and let each route handle the auth-loading state.
-    <ClerkProvider
-      publishableKey={publishableKey}
-      tokenCache={tokenCache}
-      {...(proxyUrl ? { proxyUrl } : {})}
-    >
-      <SafeAreaProvider>
-        <ThemeProvider>
-          <ErrorBoundary>
-            <QueryClientProvider client={queryClient}>
-              <ApiAuthBridge />
-              <PendingMobileLink />
-              <GuestProvider>
-                <GestureHandlerRootView style={{ flex: 1 }}>
-                  <RootLayoutNav />
-                  {!splashDone ? (
-                    <AnimatedSplash onFinish={() => setSplashDone(true)} />
-                  ) : null}
-                </GestureHandlerRootView>
-              </GuestProvider>
-            </QueryClientProvider>
-          </ErrorBoundary>
-        </ThemeProvider>
-      </SafeAreaProvider>
-    </ClerkProvider>
+    <AuthClientResetContext.Provider value={resetAuthClient}>
+      <ClerkProvider
+        key={authClientKey}
+        publishableKey={authConfig.publishableKey}
+        tokenCache={tokenCache}
+        {...(authConfig.proxyUrl ? { proxyUrl: authConfig.proxyUrl } : {})}
+      >
+        <SafeAreaProvider>
+          <ThemeProvider>
+            <ErrorBoundary>
+              <PersistQueryClientProvider
+                client={queryClient}
+                persistOptions={{
+                  persister: queryPersister,
+                  maxAge: 24 * 60 * 60 * 1000,
+                  buster: "v2",
+                  dehydrateOptions: {
+                    shouldDehydrateQuery: (query) =>
+                      query.state.status === "success" &&
+                      isPublicPersistableQuery(query),
+                  },
+                }}
+              >
+                <ApiAuthBridge />
+                <PendingMobileLink />
+                <PendingUsernameLink />
+                <GuestProvider>
+                  <GestureHandlerRootView style={{ flex: 1 }}>
+                    <RootLayoutNav />
+                    {!splashDone ? (
+                      <AnimatedSplash onFinish={() => setSplashDone(true)} />
+                    ) : null}
+                  </GestureHandlerRootView>
+                </GuestProvider>
+              </PersistQueryClientProvider>
+            </ErrorBoundary>
+          </ThemeProvider>
+        </SafeAreaProvider>
+      </ClerkProvider>
+    </AuthClientResetContext.Provider>
   );
 }

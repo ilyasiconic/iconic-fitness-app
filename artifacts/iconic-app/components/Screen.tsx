@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import { forwardRef, type ReactNode } from "react";
 import {
   KeyboardAvoidingView,
   Platform,
@@ -31,7 +31,7 @@ type Props = {
   padded?: boolean;
 };
 
-export function Screen({
+export const Screen = forwardRef<ScrollView, Props>(function Screen({
   children,
   scroll = true,
   refreshing,
@@ -39,7 +39,7 @@ export function Screen({
   edges = ["top"],
   contentContainerStyle,
   padded = true,
-}: Props) {
+}, ref) {
   const colors = useColors();
   const insets = useSafeAreaInsets();
   const padStyle = padded ? styles.padded : undefined;
@@ -69,6 +69,7 @@ export function Screen({
 
   const body = scroll ? (
         <ScrollView
+          ref={ref}
           style={styles.flex}
           contentContainerStyle={[padStyle, contentContainerStyle, topFallback]}
           showsVerticalScrollIndicator={false}
@@ -106,9 +107,10 @@ export function Screen({
       )}
     </SafeAreaView>
   );
-}
+});
 
 const styles = StyleSheet.create({
   flex: { flex: 1 },
   padded: { paddingHorizontal: 20, paddingBottom: 120 },
 });
+

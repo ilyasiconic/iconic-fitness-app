@@ -6,6 +6,7 @@ import { useEffect, useState } from "react";
 import {
   Alert,
   Image,
+  Platform,
   Pressable,
   StyleSheet,
   Switch,
@@ -32,6 +33,7 @@ import { EmptyState } from "@/components/ui-bits";
 import { useColors } from "@/hooks/useColors";
 import { cartKey, useCart } from "@/lib/cart";
 import { resolveImageUrl } from "@/lib/images";
+import { openPayment } from "@/lib/links";
 
 export default function CartScreen() {
   const colors = useColors();
@@ -68,10 +70,32 @@ export default function CartScreen() {
   const checkout = useStoreCheckout();
 
   const balance = referral.data?.balanceInr ?? 0;
-  const pointsDiscount = usePoints ? Math.min(balance, totalInr) : 0;
+  // Keep at least ₹1 payable — the online payment page needs a real charge.
+  const pointsDiscount = usePoints
+    ? Math.min(balance, Math.max(totalInr - 1, 0))
+    : 0;
   const payable = totalInr - pointsDiscount;
 
   const onPlaceOrder = async () => {
+    // Login is required to order — the order then shows in My Orders and the
+    // member gets status notifications. (Alert.alert with buttons is a no-op
+    // on react-native-web, so the web build uses window.confirm.)
+    if (!isSignedIn) {
+      const msg =
+        "Please log in to place your order — you'll get order updates and can track it in My Orders.";
+      if (Platform.OS === "web") {
+        // eslint-disable-next-line no-alert
+        if (window.confirm(`Login required\n${msg}`)) {
+          router.push("/(auth)/welcome");
+        }
+      } else {
+        Alert.alert("Login required", msg, [
+          { text: "Cancel", style: "cancel" },
+          { text: "Log in", onPress: () => router.push("/(auth)/welcome") },
+        ]);
+      }
+      return;
+    }
     if (name.trim().length < 2) {
       Alert.alert("Name required", "Please enter your full name.");
       return;
@@ -124,6 +148,9 @@ export default function CartScreen() {
       void queryClient.invalidateQueries({
         queryKey: getGetMyReferralInfoQueryKey(),
       });
+      // Hand off to the secure payment page (UPI / cards / netbanking) in the
+      // system browser; it deep-links back into the app when done.
+      await openPayment(res.paymentUrl);
     } catch (err) {
       Alert.alert(
         "Could not place order",
@@ -140,11 +167,12 @@ export default function CartScreen() {
             <Feather name="check" size={36} color={colors.primaryForeground} />
           </View>
           <AppText weight="700" size={22} style={{ textAlign: "center" }}>
-            Order placed!
+            Complete your payment
           </AppText>
           <AppText muted size={14} style={{ textAlign: "center" }}>
-            Order #{placedOrderId} — pay cash on delivery. We&apos;ll be in
-            touch soon.
+            Order #{placedOrderId} — finish the payment in the browser window
+            that just opened. Your order is confirmed as soon as the payment
+            goes through.
           </AppText>
           {isSignedIn ? (
             <Button
@@ -269,19 +297,21 @@ export default function CartScreen() {
           maxLength={6}
         />
 
-        {isSignedIn && balance > 0 ? (
+        {isSignedIn ? (
           <Card style={{ flexDirection: "row", alignItems: "center", gap: 12 }}>
             <View style={{ flex: 1 }}>
               <AppText weight="600" size={14}>
                 Use wallet points
               </AppText>
               <AppText muted size={12}>
-                Balance ₹{balance} — save ₹{Math.min(balance, totalInr)} on
-                this order
+                {balance > 0
+                  ? `Balance ₹${balance} — save ₹${Math.min(balance, totalInr)} on this order`
+                  : "You have 0 points. Earn points by referring friends — 1 point = ₹1 off."}
               </AppText>
             </View>
             <Switch
-              value={usePoints}
+              value={usePoints && balance > 0}
+              disabled={balance <= 0}
               onValueChange={setUsePoints}
               trackColor={{ true: colors.primary, false: colors.elevated }}
               thumbColor="#fff"
@@ -295,13 +325,17 @@ export default function CartScreen() {
           {pointsDiscount > 0 ? (
             <Row label="Points discount" value={`−₹${pointsDiscount}`} />
           ) : null}
-          <Row label="Payment" value="Cash on delivery" />
+          <Row label="Payment" value="Online (UPI / card)" />
           <View style={[styles.divider, { backgroundColor: colors.border }]} />
-          <Row label="To pay" value={`₹${payable}`} bold />
+          <Row label="To pay" value={`₹${payable} + GST & shipping`} bold />
+          <AppText muted size={11}>
+            GST and shipping (if any) are added on the payment page. Your order
+            bill shows the full breakup.
+          </AppText>
         </Card>
 
         <Button
-          label={checkout.isPending ? "Placing order…" : `Place order — ₹${payable}`}
+          label={checkout.isPending ? "Starting payment…" : `Pay ₹${payable} + GST & shipping`}
           icon="check-circle"
           loading={checkout.isPending}
           onPress={() => void onPlaceOrder()}

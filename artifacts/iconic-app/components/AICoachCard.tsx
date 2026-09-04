@@ -41,6 +41,8 @@ type FloatIconProps = {
 
 /** A small frosted "holographic" fitness icon that gently floats. */
 function FloatIcon({ name, style, delay, tint, border }: FloatIconProps) {
+  const colors = useColors();
+  const isDarkBg = colors.background === "#000000" || colors.background === "#121212";
   const t = useSharedValue(0);
   useEffect(() => {
     t.value = withDelay(
@@ -58,10 +60,15 @@ function FloatIcon({ name, style, delay, tint, border }: FloatIconProps) {
   }));
   return (
     <Animated.View
-      style={[styles.holo, { borderColor: border }, style, anim]}
+      style={[
+        styles.holo,
+        { borderColor: border, backgroundColor: isDarkBg ? "rgba(10,12,8,0.4)" : "rgba(255,255,255,0.4)" },
+        style,
+        anim,
+      ]}
       pointerEvents="none"
     >
-      <BlurView intensity={24} tint="dark" style={StyleSheet.absoluteFill} />
+      <BlurView intensity={24} tint={isDarkBg ? "dark" : "light"} style={StyleSheet.absoluteFill} />
       <Feather name={name} size={15} color={tint} />
     </Animated.View>
   );
@@ -123,8 +130,8 @@ export function AICoachCard({
       style={[
         embedded ? null : CARD_SHADOW,
         embedded
-          ? { borderRadius: 30, backgroundColor: "#0A0C08" }
-          : { marginTop: 20, marginBottom: 4, borderRadius: 30, backgroundColor: "#0A0C08" },
+            ? { borderRadius: 30, backgroundColor: colors.card }
+            : { marginTop: 20, marginBottom: 4, borderRadius: 30, backgroundColor: colors.card },
       ]}
     >
       <Pressable onPress={onPress}>
@@ -140,7 +147,7 @@ export function AICoachCard({
             ]}
           >
             {/* Frosted glass base */}
-            <BlurView intensity={30} tint="dark" style={StyleSheet.absoluteFill} />
+            <BlurView intensity={30} tint={colors.background === "#000000" || colors.background === "#121212" ? "dark" : "light"} style={StyleSheet.absoluteFill} />
             <View style={styles.glassTint} />
 
             {/* Emerald radial glow behind the coach (stacked soft discs) */}
@@ -169,7 +176,7 @@ export function AICoachCard({
             <View pointerEvents="none" style={[styles.particle, { top: 26, left: 150, backgroundColor: colors.primary }]} />
             <View pointerEvents="none" style={[styles.particle, { top: 92, left: 190, backgroundColor: colors.primary, opacity: 0.5 }]} />
             <View pointerEvents="none" style={[styles.particle, { top: 150, right: 150, backgroundColor: colors.primary, opacity: 0.4 }]} />
-            <View pointerEvents="none" style={[styles.particle, { top: 60, right: 118, backgroundColor: "#FFFFFF", opacity: 0.35 }]} />
+            <View pointerEvents="none" style={[styles.particle, { top: 60, right: 118, backgroundColor: colors.foreground, opacity: 0.35 }]} />
 
             {/* Floating holographic fitness icons */}
             <FloatIcon name="activity" delay={0} tint={colors.primary} border="rgba(127,194,64,0.35)" style={{ top: 18, right: 132 }} />
@@ -183,7 +190,7 @@ export function AICoachCard({
 
             {/* Top sheen for glass depth */}
             <LinearGradient
-              colors={["rgba(255,255,255,0.15)", "rgba(255,255,255,0)"]}
+              colors={[colors.background === "#000000" || colors.background === "#121212" ? "rgba(255,255,255,0.15)" : "rgba(0,0,0,0.08)", "transparent"]}
               start={{ x: 0, y: 0 }}
               end={{ x: 0, y: 1 }}
               style={styles.sheen}
@@ -195,14 +202,14 @@ export function AICoachCard({
               <View style={styles.eyebrowRow}>
                 <View style={[styles.liveDot, { backgroundColor: colors.primary, shadowColor: colors.primary, shadowOpacity: 0.8, shadowRadius: 6, shadowOffset: { width: 0, height: 0 } }]} />
                 <AppText size={11} weight="700" style={{ letterSpacing: 2, color: colors.primary }}>
-                  AI FITNESS COACH
+                  AI FITNESS AGENT
                 </AppText>
               </View>
 
-              <AppText weight="700" size={24} style={{ marginTop: 10, color: "#FFFFFF" }}>
+              <AppText weight="700" size={24} style={{ marginTop: 10, color: colors.foreground }}>
                 {title}
               </AppText>
-              <AppText size={14} style={{ marginTop: 6, maxWidth: 210, color: "rgba(255,255,255,0.7)", lineHeight: 20 }}>
+              <AppText size={14} style={{ marginTop: 6, maxWidth: 210, color: colors.mutedForeground, lineHeight: 20 }}>
                 {subtitle}
               </AppText>
 
@@ -248,7 +255,6 @@ const styles = StyleSheet.create({
   },
   glassTint: {
     ...StyleSheet.absoluteFillObject,
-    backgroundColor: "rgba(255,255,255,0.03)",
   },
   glowWrap: {
     position: "absolute",
@@ -270,7 +276,6 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     overflow: "hidden",
-    backgroundColor: "rgba(10,12,8,0.4)",
   },
   coachWrap: {
     position: "absolute",

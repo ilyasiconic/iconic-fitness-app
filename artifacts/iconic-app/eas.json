@@ -8,6 +8,9 @@
       "distribution": "internal",
       "node": "22.14.0",
       "pnpm": "10.26.1",
+      "ios": {
+        "image": "latest"
+      },
       "android": {
         "buildType": "apk",
         "image": "latest"
@@ -17,6 +20,9 @@
       "autoIncrement": true,
       "node": "22.14.0",
       "pnpm": "10.26.1",
+      "ios": {
+        "image": "latest"
+      },
       "android": {
         "buildType": "app-bundle",
         "image": "latest"
@@ -24,6 +30,10 @@
     }
   },
   "submit": {
-    "production": {}
+    "production": {
+      "ios": {
+        "ascAppId": "6804717670"
+      }
+    }
   }
 }

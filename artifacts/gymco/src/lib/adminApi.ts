@@ -25,6 +25,7 @@ export type HomeSlide = {
 
 export type YoactivBranchOption = {
   branchId: number;
+  gymId: number | null;
   branchName: string | null;
   gymLabel: string | null;
 };
@@ -255,6 +256,14 @@ export const adminApi = {
     remove: (id: number) =>
       request<{ ok: true }>(`/admin/categories/${id}`, { method: "DELETE" }),
   },
+  storeShipping: {
+    get: () => request<{ shippingInr: number }>("/admin/store/shipping"),
+    set: (shippingInr: number) =>
+      request<{ shippingInr: number }>("/admin/store/shipping", {
+        method: "PUT",
+        body: JSON.stringify({ shippingInr }),
+      }),
+  },
   orders: {
     list: () => request<any[]>("/admin/orders"),
     update: (id: number, body: Record<string, unknown>) =>
@@ -312,6 +321,23 @@ export const adminApi = {
   },
   users: {
     list: () => request<any[]>("/admin/users"),
+    resetPassword: (
+      id: number,
+      login: { username: string; mobile: string },
+      password: string,
+    ) =>
+      request<{
+        ok: true;
+        username: string | null;
+        email: string;
+        mobile: string;
+      }>(
+        `/admin/users/${id}/reset-password`,
+        {
+        method: "POST",
+          body: JSON.stringify({ ...login, password }),
+        },
+      ),
   },
   referrals: {
     settings: () => request<ReferralSettings>("/admin/referral-settings"),
@@ -321,8 +347,26 @@ export const adminApi = {
         body: JSON.stringify(body),
       }),
   },
+  signupBonus: {
+    get: () => request<{ points: number }>("/admin/signup-bonus"),
+    set: (points: number) =>
+      request<{ points: number }>("/admin/signup-bonus", {
+        method: "PUT",
+        body: JSON.stringify({ points }),
+      }),
+  },
   staff: {
     list: () => request<any[]>("/admin/staff"),
+    branches: () =>
+      request<
+        {
+          gymId: number;
+          gymName: string;
+          gymArea: string;
+          yoactivBranchId: number | null;
+          label: string;
+        }[]
+      >("/admin/staff/branches"),
     permissions: () =>
       request<{ permissions: string[] }>("/admin/staff/permissions"),
     create: (body: Record<string, unknown>) =>

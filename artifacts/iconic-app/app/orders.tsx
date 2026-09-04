@@ -104,7 +104,9 @@ export default function OrdersScreen() {
 
 function OrderCard({ order }: { order: StoreOrder }) {
   const colors = useColors();
-  const cancelled = order.status === "cancelled";
+  const cancelled =
+    order.status === "cancelled" || order.status === "payment_failed";
+  const awaitingPayment = order.status === "payment_pending";
   const stepIdx = TRACK_STEPS.indexOf(
     order.status as (typeof TRACK_STEPS)[number],
   );
@@ -136,15 +138,53 @@ function OrderCard({ order }: { order: StoreOrder }) {
 
       <View style={[styles.divider, { backgroundColor: colors.border }]} />
 
+      {/* Invoice breakdown (orders placed after GST/shipping went live) */}
+      {(order.subtotalInr ?? 0) > 0 && (
+        <View style={{ gap: 4 }}>
+          <View style={styles.rowBetween}>
+            <AppText muted size={13}>Subtotal</AppText>
+            <AppText size={13}>₹{order.subtotalInr}</AppText>
+          </View>
+          {(order.cgstInr ?? 0) > 0 && (
+            <View style={styles.rowBetween}>
+              <AppText muted size={13}>CGST</AppText>
+              <AppText size={13}>₹{order.cgstInr}</AppText>
+            </View>
+          )}
+          {(order.sgstInr ?? 0) > 0 && (
+            <View style={styles.rowBetween}>
+              <AppText muted size={13}>SGST</AppText>
+              <AppText size={13}>₹{order.sgstInr}</AppText>
+            </View>
+          )}
+          {(order.shippingInr ?? 0) > 0 && (
+            <View style={styles.rowBetween}>
+              <AppText muted size={13}>Shipping</AppText>
+              <AppText size={13}>₹{order.shippingInr}</AppText>
+            </View>
+          )}
+          {order.pointsRedeemedInr > 0 && (
+            <View style={styles.rowBetween}>
+              <AppText muted size={13}>Points discount</AppText>
+              <AppText size={13}>−₹{order.pointsRedeemedInr}</AppText>
+            </View>
+          )}
+        </View>
+      )}
+
       <View style={styles.rowBetween}>
         <AppText muted size={13}>
-          {order.paymentMethod === "cod" ? "Cash on delivery" : order.paymentMethod}
-          {order.pointsRedeemedInr > 0
+          {order.paymentMethod === "cod"
+            ? "Cash on delivery"
+            : order.paymentMethod === "online"
+              ? "Paid online"
+              : order.paymentMethod}
+          {(order.subtotalInr ?? 0) === 0 && order.pointsRedeemedInr > 0
             ? ` · ₹${order.pointsRedeemedInr} points used`
             : ""}
         </AppText>
         <AppText weight="700" size={15}>
-          ₹{order.totalInr}
+          Total ₹{order.totalInr}
         </AppText>
       </View>
 
@@ -158,7 +198,18 @@ function OrderCard({ order }: { order: StoreOrder }) {
         >
           <Feather name="x-circle" size={16} color={colors.destructive} />
           <AppText weight="600" size={13} style={{ color: colors.destructive }}>
-            This order was cancelled
+            {order.status === "payment_failed"
+              ? "Payment failed — this order wasn't placed"
+              : "This order was cancelled"}
+          </AppText>
+        </View>
+      ) : awaitingPayment ? (
+        <View
+          style={[styles.cancelBanner, { backgroundColor: colors.elevated }]}
+        >
+          <Feather name="clock" size={16} color={colors.mutedForeground} />
+          <AppText muted weight="600" size={13}>
+            Waiting for payment — the order is confirmed once paid
           </AppText>
         </View>
       ) : (

@@ -1,5 +1,5 @@
 import { Router, type IRouter, type Request, type Response } from "express";
-import { and, asc, desc, eq, gte, inArray, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gte, inArray, ne, sql } from "drizzle-orm";
 import {
   db,
   partnersTable,
@@ -66,6 +66,7 @@ import {
   removeTrainerPhoto,
 } from "../lib/trainerPhotos";
 import { notifyMemberOfComplaintUpdate } from "../lib/complaintMemberNotify";
+import { notifyOrderStatus } from "../lib/orderNotify";
 
 const router: IRouter = Router();
 
@@ -2780,21 +2781,43 @@ router.patch(
       res.status(400).json({ error: "Invalid status" });
       return;
     }
-    const updated = await db
+    // Race-safe transition: only update rows whose status actually differs,
+    // so of N concurrent identical saves only the one that changes rows
+    // notifies the member (re-saving the same status is a no-op).
+    const changedRows = await db
       .update(productOrderItemsTable)
       .set({ status })
       .where(
         and(
           eq(productOrderItemsTable.orderId, orderId),
           eq(productOrderItemsTable.vendorPartnerId, partnerId),
+          ne(productOrderItemsTable.status, status),
         ),
       )
       .returning();
-    if (updated.length === 0) {
+    // Full current item list for the response (and 404 detection).
+    const items = await db
+      .select()
+      .from(productOrderItemsTable)
+      .where(
+        and(
+          eq(productOrderItemsTable.orderId, orderId),
+          eq(productOrderItemsTable.vendorPartnerId, partnerId),
+        ),
+      );
+    if (items.length === 0) {
       res.status(404).json({ error: "Order not found" });
       return;
     }
-    res.json({ ok: true, status, items: updated });
+    // Fire-and-forget member notification — only when rows actually changed.
+    if (changedRows.length > 0) {
+      const [parent] = await db
+        .select({ userId: productOrdersTable.userId })
+        .from(productOrdersTable)
+        .where(eq(productOrdersTable.id, orderId));
+      if (parent) void notifyOrderStatus(parent.userId, orderId, status);
+    }
+    res.json({ ok: true, status, items });
   },
 );
 

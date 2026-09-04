@@ -10,102 +10,102 @@
 const colors = {
   light: {
     // Legacy aliases
-    text: "#16180F",
-    tint: "#5E9E2E",
+    text: "#1C1C1E",
+    tint: "#0BE607",
 
     // Core surfaces
-    background: "#FFFFFF",
-    foreground: "#16180F",
+    background: "#F2F2F7",
+    foreground: "#1C1C1E",
 
     // Cards / elevated surfaces
     card: "#FFFFFF",
-    cardForeground: "#16180F",
-    elevated: "#F2F5EC",
+    cardForeground: "#1C1C1E",
+    elevated: "#FFFFFF",
 
-    // Primary action color (logo green, deepened so white text passes contrast)
+    // Primary action color (logo green, refined for premium feel)
     primary: "#0BE607",
     primaryForeground: "#0A0C08",
 
     // Brand button gradient (logo green), used for primary buttons app-wide
-    primaryGradient: ["#0BE607", "#05A303"],
+    primaryGradient: ["#29E33B", "#10B720"],
 
     // Secondary surfaces
-    secondary: "#EEF2E6",
-    secondaryForeground: "#2A3320",
+    secondary: "#E5E5EA",
+    secondaryForeground: "#1C1C1E",
 
     // Muted / subdued
-    muted: "#F2F5EC",
-    mutedForeground: "#6B7560",
+    muted: "#E5E5EA",
+    mutedForeground: "#5F5F66",
 
     // Accent
-    accent: "#E9F3DC",
-    accentForeground: "#3C6B12",
+    accent: "#E5E5EA",
+    accentForeground: "#1C1C1E",
 
     // Destructive
-    destructive: "#E5484D",
+    destructive: "#FF3B30",
     destructiveForeground: "#FFFFFF",
 
     // Borders / inputs
-    border: "#E2E7D8",
-    input: "#EEF2E6",
+    border: "#E5E5EA",
+    input: "#E5E5EA",
 
-    // Domain accents (rings, charts, badges) — tuned for light surfaces
-    water: "#1FA0C4",
-    calorie: "#E8732B",
-    protein: "#8E5BE0",
-    steps: "#5E9E2E",
-    success: "#2F9E45",
-    warning: "#C9931A",
+    // Domain accents (rings, charts, badges)
+    water: "#32ADE6",
+    calorie: "#FF9500",
+    protein: "#AF52DE",
+    steps: "#34C759",
+    success: "#34C759",
+    warning: "#FFCC00",
   },
 
   dark: {
     // Legacy aliases
-    text: "#F4F7EE",
-    tint: "#7FC240",
+    text: "#F2F2F7",
+    tint: "#0BE607",
 
     // Core surfaces
-    background: "#0A0C08",
-    foreground: "#F4F7EE",
+    background: "#000000",
+    foreground: "#F2F2F7",
 
     // Cards / elevated surfaces
-    card: "#14180F",
-    cardForeground: "#F4F7EE",
-    elevated: "#1B2113",
+    card: "#121212",
+    cardForeground: "#F2F2F7",
+    elevated: "#1C1C1E",
 
     // Primary action color (bright logo green on dark)
     primary: "#0BE607",
     primaryForeground: "#0A0C08",
 
     // Brand button gradient (logo green), used for primary buttons app-wide
-    primaryGradient: ["#0BE607", "#05A303"],
+    primaryGradient: ["#29E33B", "#10B720"],
 
     // Secondary surfaces
-    secondary: "#1B2113",
-    secondaryForeground: "#E6F0D6",
+    secondary: "#1C1C1E",
+    secondaryForeground: "#EBEBF5",
 
     // Muted / subdued
-    muted: "#1B2113",
-    mutedForeground: "#94A187",
+    muted: "#1C1C1E",
+    mutedForeground: "#8E8E93",
 
     // Accent
-    accent: "#1F2A12",
-    accentForeground: "#7FC240",
+    accent: "#2C2C2E",
+    accentForeground: "#0BE607",
 
     // Destructive
-    destructive: "#FF6B6B",
+    destructive: "#FF453A",
     destructiveForeground: "#0A0C08",
 
     // Borders / inputs
-    border: "#262E1A",
-    input: "#1B2113",
+    border: "#2C2C2E",
+    input: "#1C1C1E",
 
     // Domain accents (rings, charts, badges)
-    water: "#43D6F7",
-    calorie: "#FF9248",
-    protein: "#B98BFF",
-    steps: "#7FC240",
-    success: "#7CE38B",
-    warning: "#FFCF5C",
+    water: "#64D2FF",
+    calorie: "#FF9F0A",
+    protein: "#BF5AF2",
+    steps: "#32D74B",
+    success: "#30D158",
+    warning: "#FFD60A",
   },
 
   radius: 20,

@@ -1,51 +1,23 @@
-import { useEffect, useMemo, useRef } from "react";
-import { View, type StyleProp, type ViewStyle } from "react-native";
-import { WebView } from "react-native-webview";
+import { Feather } from "@expo/vector-icons";
+import {
+  Image,
+  StyleSheet,
+  Text,
+  View,
+  type StyleProp,
+  type ViewStyle,
+} from "react-native";
 
 /**
- * Inline auto-playing YouTube player for the home banner (native).
- * Loads the YouTube IFrame Player API inside a WebView so we can play only
- * while the slide is active and post a message back when the video ends, so the
- * carousel advances after the video finishes. Non-interactive (parent View has
- * pointerEvents="none") so taps open the full video and swipes still page.
+ * Native branch-tour preview.
+ *
+ * YouTube rejects playback inside some embedded iOS/Android WebViews with
+ * player error 152. Native builds therefore show YouTube's thumbnail and let
+ * the parent Pressable open the real video in YouTube or the system browser.
+ * Expo web keeps the inline iframe implementation in YouTubeInline.web.tsx.
  */
-
-function buildHtml(videoId: string, initialActive: boolean, loop: boolean) {
-  const loopVars = loop ? "loop:1,playlist:'" + videoId + "'," : "";
-  return `<!DOCTYPE html><html><head>
-<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
-<style>*{margin:0;padding:0}html,body{height:100%;background:#000;overflow:hidden}#p{width:100%;height:100%}</style>
-</head><body>
-<div id="p"></div>
-<script src="https://www.youtube.com/iframe_api"></script>
-<script>
-var player, ready=false, desiredActive=${initialActive ? "true" : "false"};
-// setActive is the single source of truth for playback. It stores the desired
-// state and applies it if the player is ready; otherwise onReady applies it.
-function setActive(a){
-  desiredActive=a;
-  if(ready&&player){ if(a){player.seekTo(0);player.playVideo();} else {player.pauseVideo();} }
-}
-function onYouTubeIframeAPIReady(){
-  player=new YT.Player('p',{videoId:'${videoId}',
-    playerVars:{autoplay:${initialActive ? "1" : "0"},mute:1,controls:0,playsinline:1,rel:0,modestbranding:1,fs:0,iv_load_policy:3,disablekb:1,${loopVars}},
-    events:{
-      onReady:function(e){ready=true;e.target.mute();setActive(desiredActive);},
-      onStateChange:function(e){ if(e.data===0 && !${loop ? "true" : "false"}){ if(window.ReactNativeWebView){window.ReactNativeWebView.postMessage('ended');} } }
-    }});
-}
-// Back-compat aliases (unused but harmless).
-function play(){ setActive(true); }
-function pause(){ setActive(false); }
-true;
-</script></body></html>`;
-}
-
 export function YouTubeInline({
   videoId,
-  active = true,
-  loop = false,
-  onEnded,
   style,
 }: {
   videoId: string;
@@ -54,48 +26,63 @@ export function YouTubeInline({
   onEnded?: () => void;
   style?: StyleProp<ViewStyle>;
 }) {
-  const ref = useRef<WebView>(null);
-  const initialActive = useRef(active).current;
-  // Track the latest active state so onLoadEnd can apply the CURRENT value even
-  // if the slide changed while the WebView was still loading.
-  const activeRef = useRef(active);
-  activeRef.current = active;
-  const html = useMemo(
-    () => buildHtml(videoId, initialActive, loop),
-    [videoId, initialActive, loop],
-  );
-
-  // Play only while this slide is active; restart on (re)activation. setActive
-  // stores the desired state and defers to onReady if the player isn't ready.
-  useEffect(() => {
-    ref.current?.injectJavaScript(`setActive(${active}); true;`);
-  }, [active]);
-
   return (
-    <View style={style} pointerEvents="none">
-      <WebView
-        ref={ref}
-        source={{ html, baseUrl: "https://www.youtube.com" }}
-        originWhitelist={["*"]}
-        style={{ flex: 1, backgroundColor: "transparent" }}
-        allowsInlineMediaPlayback
-        mediaPlaybackRequiresUserAction={false}
-        javaScriptEnabled
-        domStorageEnabled
-        scrollEnabled={false}
-        pointerEvents="none"
-        androidLayerType="hardware"
-        onMessage={(e) => {
-          if (e.nativeEvent.data === "ended") onEnded?.();
+    <View style={[styles.container, style]} pointerEvents="none">
+      <Image
+        source={{
+          uri: `https://img.youtube.com/vi/${videoId}/hqdefault.jpg`,
         }}
-        // Apply the latest active state once the page loads; if the YT player
-        // isn't ready yet, onReady picks up desiredActive from setActive.
-        onLoadEnd={() => {
-          ref.current?.injectJavaScript(
-            `setActive(${activeRef.current}); true;`,
-          );
-        }}
+        style={StyleSheet.absoluteFill}
+        resizeMode="cover"
       />
+      <View style={styles.scrim} />
+      <View style={styles.playButton}>
+        <Feather name="play" size={30} color="#FFFFFF" />
+      </View>
+      <View style={styles.label}>
+        <Text style={styles.labelText}>WATCH ON YOUTUBE</Text>
+        <Feather name="external-link" size={13} color="#FFFFFF" />
+      </View>
     </View>
   );
 }
+
+const styles = StyleSheet.create({
+  container: {
+    overflow: "hidden",
+    backgroundColor: "#000000",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  scrim: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: "rgba(0,0,0,0.22)",
+  },
+  playButton: {
+    width: 66,
+    height: 48,
+    borderRadius: 14,
+    alignItems: "center",
+    justifyContent: "center",
+    paddingLeft: 4,
+    backgroundColor: "#FF0000",
+  },
+  label: {
+    position: "absolute",
+    right: 12,
+    bottom: 12,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    borderRadius: 999,
+    paddingHorizontal: 11,
+    paddingVertical: 7,
+    backgroundColor: "rgba(0,0,0,0.72)",
+  },
+  labelText: {
+    color: "#FFFFFF",
+    fontSize: 11,
+    fontWeight: "700",
+    letterSpacing: 0.7,
+  },
+});

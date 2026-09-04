@@ -1,5 +1,5 @@
 import { Router, type IRouter, type Request, type Response } from "express";
-import { and, asc, desc, eq, inArray, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNull, ne, sql } from "drizzle-orm";
 import {
   db,
   adminsTable,
@@ -26,7 +26,14 @@ import {
   trainerBookingsTable,
   packageBookingsTable,
   packageCategoriesTable,
+  appSettingsTable,
 } from "@workspace/db";
+import { SHIPPING_SETTING_KEY, storeShippingInr } from "./store";
+import {
+  SIGNUP_BONUS_SETTING_KEY,
+  signupBonusPoints,
+} from "../lib/signupBonus";
+import { notifyOrderStatus } from "../lib/orderNotify";
 import {
   hashPassword,
   requireAdmin,
@@ -34,6 +41,10 @@ import {
   verifyPassword,
 } from "../lib/adminAuth";
 import { STAFF_PERMISSIONS } from "../lib/staffAuth";
+import {
+  MEMBER_USERNAME_RULE,
+  normalizeMemberUsername,
+} from "../lib/memberUsername";
 import {
   forceReseedFromSnapshot,
   syncMissingPackageCatalog,
@@ -1785,9 +1796,11 @@ router.get(
         const plan = um ? planMap.get(um.planId) : undefined;
         return {
           id: u.id,
+          username: u.username,
           name: u.name,
           email: u.email,
           mobile: u.mobile,
+          clerkLinked: Boolean(u.clerkUserId),
           avatarUrl: u.avatarUrl || null,
           city: u.city,
           joinedAt: u.joinedAt,
@@ -1797,6 +1810,216 @@ router.get(
         };
       }),
     );
+  },
+);
+
+router.post(
+  "/admin/users/:id/reset-password",
+  requireAdmin,
+  async (req: Request, res: Response): Promise<void> => {
+    const id = Number(req.params.id);
+    const body = req.body as
+      | { password?: unknown; mobile?: unknown; username?: unknown }
+      | null;
+    const password = body?.password;
+    const mobileInput =
+      typeof body?.mobile === "string" ? body.mobile : undefined;
+    const mobileProvided = mobileInput !== undefined;
+    const mobileRaw = mobileInput?.trim() ?? "";
+    const normalizedMobile = mobileRaw ? normalizeMobile(mobileRaw) : "";
+    const usernameProvided =
+      typeof body?.username === "string" || body?.username === null;
+    const username = usernameProvided
+      ? normalizeMemberUsername(body?.username)
+      : null;
+    if (!Number.isInteger(id) || id <= 0) {
+      res.status(400).json({ error: "Invalid member" });
+      return;
+    }
+    if (mobileRaw && !normalizedMobile) {
+      res.status(400).json({ error: "Enter a valid 10-digit mobile number" });
+      return;
+    }
+    if (usernameProvided && username === undefined) {
+      res.status(400).json({ error: MEMBER_USERNAME_RULE });
+      return;
+    }
+    if (
+      typeof password !== "string" ||
+      password.length < 8 ||
+      password.length > 200
+    ) {
+      res.status(400).json({ error: "Password must be 8–200 characters" });
+      return;
+    }
+
+    const [member] = await db
+      .select({
+        clerkUserId: usersTable.clerkUserId,
+        username: usersTable.username,
+        email: usersTable.email,
+        mobile: usersTable.mobile,
+      })
+      .from(usersTable)
+      .where(eq(usersTable.id, id))
+      .limit(1);
+    if (!member) {
+      res.status(404).json({ error: "Member not found" });
+      return;
+    }
+    if (!member.clerkUserId) {
+      res.status(409).json({
+        error:
+          "This member is not linked to a login account yet. Ask them to sign up first.",
+      });
+      return;
+    }
+
+    const nextMobile = mobileProvided
+      ? (normalizedMobile ?? "")
+      : member.mobile;
+    const nextUsername: string | null = usernameProvided
+      ? (username ?? null)
+      : member.username;
+    const identifiersChanged =
+      member.mobile !== nextMobile || member.username !== nextUsername;
+    if (identifiersChanged) {
+      try {
+        const changed = await db
+          .update(usersTable)
+          .set({ mobile: nextMobile, username: nextUsername })
+          .where(
+            and(
+              eq(usersTable.id, id),
+              eq(usersTable.mobile, member.mobile),
+              member.username === null
+                ? isNull(usersTable.username)
+                : eq(usersTable.username, member.username),
+            ),
+          )
+          .returning({ id: usersTable.id });
+        if (!changed[0]) {
+          res.status(409).json({
+            error:
+              "This member's login details changed. Refresh the user list and try again. No password was changed.",
+          });
+          return;
+        }
+      } catch (err: unknown) {
+        const dbCode =
+          (err as { code?: string })?.code ??
+          (err as { cause?: { code?: string } })?.cause?.code;
+        res.status(dbCode === "23505" ? 409 : 500).json({
+          error:
+            dbCode === "23505"
+              ? "That username is already taken. No password was changed."
+              : "Could not save the login details. No password was changed.",
+        });
+        return;
+      }
+    }
+
+    try {
+      await clerkClient.users.updateUser(member.clerkUserId, {
+        password,
+        signOutOfOtherSessions: true,
+      });
+      console.info("admin-member-password-reset", {
+        adminId: req.session.adminId,
+        targetUserId: id,
+      });
+      res.json({
+        ok: true,
+        username: nextUsername,
+        email: member.email,
+        mobile: nextMobile,
+      });
+    } catch (err: unknown) {
+      const clerkStatus = (err as { status?: unknown })?.status;
+      const confirmedClerkRejection =
+        typeof clerkStatus === "number" &&
+        clerkStatus >= 400 &&
+        clerkStatus < 500 &&
+        clerkStatus !== 429;
+
+      // A transport failure can happen after Clerk applied the password but
+      // before its response reached us. Reconcile before changing the mobile
+      // back so the operator is never given a false "nothing changed" result.
+      if (!confirmedClerkRejection) {
+        try {
+          await clerkClient.users.verifyPassword({
+            userId: member.clerkUserId,
+            password,
+          });
+          console.warn("admin-member-password-reset-reconciled", {
+            adminId: req.session.adminId,
+            targetUserId: id,
+          });
+          res.json({
+            ok: true,
+            username: nextUsername,
+            email: member.email,
+            mobile: nextMobile,
+          });
+          return;
+        } catch (verifyErr: unknown) {
+          const verifyStatus = (verifyErr as { status?: unknown })?.status;
+          const confirmedPasswordMismatch =
+            typeof verifyStatus === "number" &&
+            verifyStatus >= 400 &&
+            verifyStatus < 500 &&
+            verifyStatus !== 429;
+          if (!confirmedPasswordMismatch) {
+            res.status(502).json({
+              error:
+                "The login details were saved, but the password update could not be confirmed. Retry with the same password.",
+            });
+            return;
+          }
+        }
+      }
+
+      let identifiersRollbackFailed = false;
+      if (identifiersChanged) {
+        try {
+          await db
+            .update(usersTable)
+            .set({ mobile: member.mobile, username: member.username })
+            .where(
+              and(
+                eq(usersTable.id, id),
+                eq(usersTable.mobile, nextMobile),
+                nextUsername === null
+                  ? isNull(usersTable.username)
+                  : eq(usersTable.username, nextUsername),
+              ),
+            );
+        } catch {
+          identifiersRollbackFailed = true;
+          console.error("admin-member-login-details-rollback-failed", {
+            adminId: req.session.adminId,
+            targetUserId: id,
+          });
+        }
+      }
+      if (identifiersRollbackFailed) {
+        res.status(500).json({
+          error:
+            "The login details were saved, but the password was not changed. Retry the reset for this member.",
+        });
+        return;
+      }
+      const clerkErrors = (
+        err as {
+          errors?: Array<{ longMessage?: string; message?: string }>;
+        }
+      )?.errors;
+      const message =
+        clerkErrors?.[0]?.longMessage ??
+        clerkErrors?.[0]?.message ??
+        "Password could not be updated. Choose a stronger password and try again.";
+      res.status(400).json({ error: message });
+    }
   },
 );
 
@@ -1874,6 +2097,73 @@ router.get(
   },
 );
 
+/** GST rates are 0–50%; anything else is a typo — clamp, don't reject. */
+function clampGstPercent(v: unknown): number {
+  const n = Number(v);
+  if (!Number.isFinite(n) || n < 0) return 0;
+  return Math.min(50, Math.round(n * 100) / 100);
+}
+
+// ── Welcome (signup) bonus points (saved in app settings) ──
+
+router.get(
+  "/admin/signup-bonus",
+  requireAdmin,
+  async (_req: Request, res: Response): Promise<void> => {
+    res.json({ points: await signupBonusPoints() });
+  },
+);
+
+router.put(
+  "/admin/signup-bonus",
+  requireAdmin,
+  async (req: Request, res: Response): Promise<void> => {
+    const n = Math.round(Number((req.body ?? {}).points));
+    if (!Number.isFinite(n) || n < 0 || n > 100000) {
+      res.status(400).json({ error: "Bonus must be 0–100000 points" });
+      return;
+    }
+    await db
+      .insert(appSettingsTable)
+      .values({ key: SIGNUP_BONUS_SETTING_KEY, value: String(n) })
+      .onConflictDoUpdate({
+        target: appSettingsTable.key,
+        set: { value: String(n), updatedAt: new Date() },
+      });
+    res.json({ points: n });
+  },
+);
+
+// ── Store shipping charge (flat ₹ per order, saved in app settings) ──
+
+router.get(
+  "/admin/store/shipping",
+  requireAdmin,
+  async (_req: Request, res: Response): Promise<void> => {
+    res.json({ shippingInr: await storeShippingInr() });
+  },
+);
+
+router.put(
+  "/admin/store/shipping",
+  requireAdmin,
+  async (req: Request, res: Response): Promise<void> => {
+    const n = Math.round(Number((req.body ?? {}).shippingInr));
+    if (!Number.isFinite(n) || n < 0 || n > 100000) {
+      res.status(400).json({ error: "Shipping charge must be 0–100000 ₹" });
+      return;
+    }
+    await db
+      .insert(appSettingsTable)
+      .values({ key: SHIPPING_SETTING_KEY, value: String(n) })
+      .onConflictDoUpdate({
+        target: appSettingsTable.key,
+        set: { value: String(n), updatedAt: new Date() },
+      });
+    res.json({ shippingInr: n });
+  },
+);
+
 router.post(
   "/admin/products",
   requireAdmin,
@@ -1900,6 +2190,8 @@ router.post(
         colors: Array.isArray(b.colors) ? b.colors.map(String) : [],
         stock: Number(b.stock ?? 0),
         status: String(b.status ?? "active"),
+        cgstPercent: clampGstPercent(b.cgstPercent),
+        sgstPercent: clampGstPercent(b.sgstPercent),
       })
       .returning();
     res.json(row);
@@ -1928,6 +2220,10 @@ router.patch(
     if (b.status !== undefined) patch.status = String(b.status);
     if (b.vendorPartnerId !== undefined)
       patch.vendorPartnerId = Number(b.vendorPartnerId);
+    if (b.cgstPercent !== undefined)
+      patch.cgstPercent = clampGstPercent(b.cgstPercent);
+    if (b.sgstPercent !== undefined)
+      patch.sgstPercent = clampGstPercent(b.sgstPercent);
     const [row] = await db
       .update(productsTable)
       .set(patch)
@@ -1984,6 +2280,68 @@ router.patch(
     const b = (req.body ?? {}) as Record<string, any>;
     const patch: Record<string, unknown> = {};
     if (b.status !== undefined) patch.status = String(b.status);
+    // Payment states belong to the gateway flow, not manual fulfilment edits:
+    // staff may cancel an unpaid order, but never flip it to "placed" (that
+    // happens only via the verified Airpay callback), and never move any
+    // order INTO a payment_* state by hand.
+    let previousStatus: string | null = null;
+    if (typeof patch.status === "string") {
+      if (patch.status.startsWith("payment_")) {
+        res.status(400).json({ error: "Payment statuses are set by the gateway" });
+        return;
+      }
+      const [current] = await db
+        .select({ status: productOrdersTable.status })
+        .from(productOrdersTable)
+        .where(eq(productOrdersTable.id, id));
+      if (!current) {
+        res.status(404).json({ error: "Order not found" });
+        return;
+      }
+      if (
+        (current.status === "payment_pending" ||
+          current.status === "payment_failed") &&
+        patch.status !== "cancelled"
+      ) {
+        res.status(400).json({
+          error: "Unpaid orders can only be cancelled — payment confirms them",
+        });
+        return;
+      }
+      previousStatus = current.status;
+    }
+    // Race-safe transition: condition the UPDATE on the status actually
+    // changing, so of N concurrent identical saves only the one that flips
+    // the row notifies the member (re-saving the same status is a no-op).
+    if (typeof patch.status === "string") {
+      const [flipped] = await db
+        .update(productOrdersTable)
+        .set(patch)
+        .where(
+          and(
+            eq(productOrdersTable.id, id),
+            ne(productOrdersTable.status, patch.status),
+          ),
+        )
+        .returning();
+      if (flipped) {
+        void notifyOrderStatus(flipped.userId, flipped.id, flipped.status);
+        res.json(flipped);
+        return;
+      }
+      // No row flipped — either already in this status (idempotent success)
+      // or the order vanished.
+      const [row] = await db
+        .select()
+        .from(productOrdersTable)
+        .where(eq(productOrdersTable.id, id));
+      if (!row) {
+        res.status(404).json({ error: "Order not found" });
+        return;
+      }
+      res.json(row);
+      return;
+    }
     const [row] = await db
       .update(productOrdersTable)
       .set(patch)
@@ -2156,11 +2514,15 @@ router.get(
         name: staffTable.name,
         email: staffTable.email,
         username: staffTable.username,
+        gymId: staffTable.gymId,
+        gymName: gymsTable.name,
+        yoactivStaffId: staffTable.yoactivStaffId,
         isActive: staffTable.isActive,
         permissions: staffTable.permissions,
         createdAt: staffTable.createdAt,
       })
       .from(staffTable)
+      .leftJoin(gymsTable, eq(staffTable.gymId, gymsTable.id))
       .orderBy(desc(staffTable.createdAt));
     res.json(rows);
   },
@@ -2174,11 +2536,42 @@ router.get(
   },
 );
 
+router.get(
+  "/admin/staff/branches",
+  requireAdmin,
+  async (_req: Request, res: Response): Promise<void> => {
+    const rows = await db
+      .select({
+        gymId: gymsTable.id,
+        gymName: gymsTable.name,
+        gymArea: gymsTable.area,
+        yoactivBranchId: gymsTable.yoactivBranchId,
+      })
+      .from(gymsTable)
+      .orderBy(asc(gymsTable.area), asc(gymsTable.name));
+    res.json(
+      rows.map((row) => ({
+        ...row,
+        label: `${row.gymName} (${row.gymArea})`,
+      })),
+    );
+  },
+);
+
 router.post(
   "/admin/staff",
   requireAdmin,
   async (req: Request, res: Response): Promise<void> => {
-    const { name, email, username, password, permissions, isActive } =
+    const {
+      name,
+      email,
+      username,
+      password,
+      permissions,
+      isActive,
+      gymId,
+      yoactivStaffId,
+    } =
       (req.body ?? {}) as {
         name?: string;
         email?: string;
@@ -2186,6 +2579,8 @@ router.post(
         password?: string;
         permissions?: unknown;
         isActive?: boolean;
+        gymId?: number | null;
+        yoactivStaffId?: string | null;
       };
     if (!name || !email || !password) {
       res.status(400).json({ error: "name, email, password required" });
@@ -2204,6 +2599,44 @@ router.post(
       return;
     }
     const perms = sanitizePermissions(permissions);
+    const cleanYoactivStaffId =
+      String(yoactivStaffId ?? "").trim() || null;
+    const cleanGymId =
+      gymId === null || gymId === undefined ? null : Number(gymId);
+    if (
+      cleanGymId !== null &&
+      (!Number.isInteger(cleanGymId) || cleanGymId <= 0)
+    ) {
+      res.status(400).json({ error: "Select a valid branch" });
+      return;
+    }
+    if (cleanGymId === null) {
+      res.status(400).json({ error: "Select a branch for this staff member" });
+      return;
+    }
+    if (perms.includes("pt.manage") && cleanYoactivStaffId === null) {
+      res.status(400).json({
+        error:
+          "PT staff must be linked from that branch's YoActiv roster",
+      });
+      return;
+    }
+    if (cleanGymId !== null) {
+      const [gym] = await db
+        .select({ yoactivBranchId: gymsTable.yoactivBranchId })
+        .from(gymsTable)
+        .where(eq(gymsTable.id, cleanGymId));
+      if (!gym) {
+        res.status(400).json({ error: "Selected branch does not exist" });
+        return;
+      }
+      if (perms.includes("pt.manage") && !gym.yoactivBranchId) {
+        res.status(400).json({
+          error: "Selected branch is not linked to YoActiv yet",
+        });
+        return;
+      }
+    }
     const passwordHash = await hashPassword(password);
     try {
       const [created] = await db
@@ -2212,6 +2645,8 @@ router.post(
           name,
           email: email.toLowerCase().trim(),
           username: cleanUsername,
+          gymId: cleanGymId,
+          yoactivStaffId: cleanYoactivStaffId,
           passwordHash,
           permissions: perms,
           isActive: isActive !== false,
@@ -2221,6 +2656,8 @@ router.post(
           name: staffTable.name,
           email: staffTable.email,
           username: staffTable.username,
+          gymId: staffTable.gymId,
+          yoactivStaffId: staffTable.yoactivStaffId,
           isActive: staffTable.isActive,
           permissions: staffTable.permissions,
           createdAt: staffTable.createdAt,
@@ -2245,11 +2682,27 @@ router.patch(
   requireAdmin,
   async (req: Request, res: Response): Promise<void> => {
     const id = Number(req.params.id);
-    const { name, username, permissions, isActive } = (req.body ?? {}) as {
+    const [current] = await db
+      .select({
+        permissions: staffTable.permissions,
+        gymId: staffTable.gymId,
+        yoactivStaffId: staffTable.yoactivStaffId,
+      })
+      .from(staffTable)
+      .where(eq(staffTable.id, id));
+    if (!current) {
+      res.status(404).json({ error: "Not found" });
+      return;
+    }
+    const { name, username, permissions, isActive, gymId, yoactivStaffId } = (
+      req.body ?? {}
+    ) as {
       name?: string;
       username?: string | null;
       permissions?: unknown;
       isActive?: boolean;
+      gymId?: number | null;
+      yoactivStaffId?: string | null;
     };
     const patch: Record<string, unknown> = {};
     if (name !== undefined) patch.name = name;
@@ -2267,6 +2720,66 @@ router.patch(
     if (permissions !== undefined)
       patch.permissions = sanitizePermissions(permissions);
     if (isActive !== undefined) patch.isActive = Boolean(isActive);
+    if (gymId !== undefined) {
+      if (gymId === null) {
+        patch.gymId = null;
+      } else {
+        const cleanGymId = Number(gymId);
+        if (!Number.isInteger(cleanGymId) || cleanGymId <= 0) {
+          res.status(400).json({ error: "Select a valid branch" });
+          return;
+        }
+        patch.gymId = cleanGymId;
+      }
+    }
+    if (yoactivStaffId !== undefined) {
+      patch.yoactivStaffId =
+        String(yoactivStaffId ?? "").trim() || null;
+    }
+    const finalPermissions =
+      permissions !== undefined
+        ? sanitizePermissions(permissions)
+        : current.permissions;
+    const finalGymId =
+      gymId !== undefined
+        ? gymId === null
+          ? null
+          : Number(gymId)
+        : current.gymId;
+    const finalYoactivStaffId =
+      yoactivStaffId !== undefined
+        ? String(yoactivStaffId ?? "").trim() || null
+        : current.yoactivStaffId;
+    if (finalGymId === null) {
+      res.status(400).json({ error: "Select a branch for this staff member" });
+      return;
+    }
+    if (
+      finalPermissions.includes("pt.manage") &&
+      finalYoactivStaffId === null
+    ) {
+      res.status(400).json({
+        error:
+          "PT staff must be linked from that branch's YoActiv roster",
+      });
+      return;
+    }
+    if (finalGymId !== null) {
+      const [gym] = await db
+        .select({ yoactivBranchId: gymsTable.yoactivBranchId })
+        .from(gymsTable)
+        .where(eq(gymsTable.id, finalGymId));
+      if (!gym) {
+        res.status(400).json({ error: "Selected branch does not exist" });
+        return;
+      }
+      if (finalPermissions.includes("pt.manage") && !gym.yoactivBranchId) {
+        res.status(400).json({
+          error: "Selected branch is not linked to YoActiv yet",
+        });
+        return;
+      }
+    }
     if (Object.keys(patch).length === 0) {
       res.status(400).json({ error: "Nothing to update" });
       return;
@@ -2281,6 +2794,8 @@ router.patch(
           name: staffTable.name,
           email: staffTable.email,
           username: staffTable.username,
+          gymId: staffTable.gymId,
+          yoactivStaffId: staffTable.yoactivStaffId,
           isActive: staffTable.isActive,
           permissions: staffTable.permissions,
           createdAt: staffTable.createdAt,
@@ -2295,7 +2810,7 @@ router.patch(
       if (/unique|duplicate/i.test(msg)) {
         res
           .status(409)
-          .json({ error: "That username is already taken" });
+          .json({ error: "That username or YoActiv trainer is already linked" });
         return;
       }
       res.status(500).json({ error: msg });
@@ -2594,22 +3109,30 @@ router.get(
     const gyms = branchIds.length
       ? await db
           .select({
+            gymId: gymsTable.id,
             name: gymsTable.name,
             area: gymsTable.area,
             yoactivBranchId: gymsTable.yoactivBranchId,
+            yoactivPtBranchId: gymsTable.yoactivPtBranchId,
           })
           .from(gymsTable)
-          .where(inArray(gymsTable.yoactivBranchId, branchIds))
       : [];
     const labelByBranch = new Map<number, string>();
+    const gymIdByBranch = new Map<number, number>();
     for (const g of gyms) {
       if (g.yoactivBranchId && !labelByBranch.has(g.yoactivBranchId)) {
         labelByBranch.set(g.yoactivBranchId, `${g.name} (${g.area})`);
+        gymIdByBranch.set(g.yoactivBranchId, g.gymId);
+      }
+      if (g.yoactivPtBranchId && !labelByBranch.has(g.yoactivPtBranchId)) {
+        labelByBranch.set(g.yoactivPtBranchId, `${g.name} (${g.area})`);
+        gymIdByBranch.set(g.yoactivPtBranchId, g.gymId);
       }
     }
     res.json(
       branchIds.map((branchId) => ({
         branchId,
+        gymId: gymIdByBranch.get(branchId) ?? null,
         branchName: yoactivBranchName(branchId),
         gymLabel: labelByBranch.get(branchId) ?? null,
       })),

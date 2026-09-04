@@ -352,11 +352,16 @@ function landingHtml(ok: boolean): string {
     ? "Your membership package is active. You can close this page and return to the Iconic Fitness app."
     : "The payment didn't go through. You can close this page, return to the app and try again.";
   const accent = ok ? "#C7F000" : "#ff6b6b";
+  // Try to bounce straight back into the app via its deep-link scheme; keep a
+  // visible button as the fallback (the auto-attempt is a no-op if the scheme
+  // isn't handled, e.g. on desktop browsers).
   return `<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><title>${title}</title></head>
 <body style="margin:0;font-family:system-ui,sans-serif;background:#0A0C08;color:#fff;display:flex;align-items:center;justify-content:center;min-height:100vh;text-align:center">
 <div style="padding:32px;max-width:360px"><div style="font-size:48px">${ok ? "✓" : "✕"}</div>
 <h1 style="color:${accent};font-size:22px;margin:12px 0">${title}</h1>
-<p style="color:#aaa;font-size:15px;line-height:1.5">${msg}</p></div></body></html>`;
+<p style="color:#aaa;font-size:15px;line-height:1.5">${msg}</p>
+<a href="iconic-app://" style="display:inline-block;margin-top:20px;padding:14px 28px;border-radius:999px;background:${accent};color:#0A0C08;font-weight:700;text-decoration:none">Back to the app</a></div>
+<script>setTimeout(function(){window.location.href="iconic-app://";},600);</script></body></html>`;
 }
 
 router.get(

@@ -11,6 +11,10 @@ export interface StoreOrder {
   id: number;
   totalInr: number;
   pointsRedeemedInr: number;
+  subtotalInr?: number;
+  cgstInr?: number;
+  sgstInr?: number;
+  shippingInr?: number;
   paymentMethod: string;
   /** placed | confirmed | shipped | delivered | cancelled */
   status: string;

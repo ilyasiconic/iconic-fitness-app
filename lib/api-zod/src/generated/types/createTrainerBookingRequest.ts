@@ -19,4 +19,9 @@ export interface CreateTrainerBookingRequest {
   preferredDate: string;
   /** Optional coupon code — validated and applied server-side */
   couponCode?: string;
+  /**
+     * Wallet points (₹) to apply as a discount — clamped server-side, at least ₹1 stays payable
+     * @minimum 0
+     */
+  redeemPoints?: number;
 }

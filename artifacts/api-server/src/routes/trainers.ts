@@ -1,6 +1,6 @@
 import { Router, type IRouter } from "express";
-import { eq } from "drizzle-orm";
-import { db, trainersTable } from "@workspace/db";
+import { and, eq, sql } from "drizzle-orm";
+import { db, staffTable, trainersTable } from "@workspace/db";
 import {
   ListTrainersQueryParams,
   ListTrainersResponse,
@@ -27,12 +27,19 @@ router.get("/trainers/live", microCache(TRAINERS_TTL_MS), async (req, res): Prom
     return;
   }
   const parsed = ListLiveTrainersQueryParams.safeParse(req.query);
-  let branchId: number | undefined;
-  if (parsed.success && parsed.data.gymId !== undefined) {
+  if (!parsed.success || parsed.data.gymId === undefined) {
+    // A mobile roster without a selected branch must never aggregate trainers
+    // from every configured YoActiv branch.
+    res.json(ListLiveTrainersResponse.parse([]));
+    return;
+  }
+  let branchId: number;
+  const selectedGymId = parsed.data.gymId;
+  {
     const [gym] = await db
       .select({ yoactivBranchId: gymsTable.yoactivBranchId })
       .from(gymsTable)
-      .where(eq(gymsTable.id, parsed.data.gymId));
+      .where(eq(gymsTable.id, selectedGymId));
     // A gym without a branch mapping has no live roster — the app then shows
     // the local trainer profiles instead of another branch's coaches.
     if (!gym?.yoactivBranchId) {
@@ -42,10 +49,30 @@ router.get("/trainers/live", microCache(TRAINERS_TTL_MS), async (req, res): Prom
     branchId = gym.yoactivBranchId;
   }
   const trainers = await fetchYoactivTrainers(branchId);
-  const photos = await trainerPhotoMap(trainers.map((t) => t.id));
+  const activeStaff = await db
+    .select({
+      name: staffTable.name,
+      yoactivStaffId: staffTable.yoactivStaffId,
+    })
+    .from(staffTable)
+    .where(
+      and(
+        eq(staffTable.gymId, selectedGymId),
+        eq(staffTable.isActive, true),
+        sql`${staffTable.permissions} @> ARRAY['pt.manage']::text[]`,
+      ),
+    );
+  const allowedIds = new Set(
+    activeStaff.map((s) => s.yoactivStaffId).filter((id): id is string => !!id),
+  );
+  const visibleTrainers = trainers.filter((t) => allowedIds.has(t.id));
+  const photos = await trainerPhotoMap(visibleTrainers.map((t) => t.id));
   res.json(
     ListLiveTrainersResponse.parse(
-      trainers.map((t) => ({ ...t, photoUrl: photos.get(t.id) ?? null })),
+      visibleTrainers.map((t) => ({
+        ...t,
+        photoUrl: photos.get(t.id) ?? null,
+      })),
     ),
   );
 });

@@ -245,13 +245,15 @@ export const ListStoreProductsResponseItem = zod.object({
   "status": zod.string().optional(),
   "description": zod.string().optional(),
   "sizes": zod.array(zod.string()).optional(),
-  "colors": zod.array(zod.string()).optional()
+  "colors": zod.array(zod.string()).optional(),
+  "cgstPercent": zod.number().optional(),
+  "sgstPercent": zod.number().optional()
 })
 export const ListStoreProductsResponse = zod.array(ListStoreProductsResponseItem)
 
 
 /**
- * @summary Place a Cash-on-Delivery store order (guest or signed-in)
+ * @summary Start a store order with online payment (guest or signed-in)
  */
 export const StoreCheckoutBody = zod.object({
   "customerName": zod.string(),
@@ -273,7 +275,12 @@ export const StoreCheckoutResponse = zod.object({
   "ok": zod.boolean(),
   "orderId": zod.number(),
   "total": zod.number(),
-  "redeemedInr": zod.number()
+  "redeemedInr": zod.number(),
+  "subtotalInr": zod.number().optional(),
+  "cgstInr": zod.number().optional(),
+  "sgstInr": zod.number().optional(),
+  "shippingInr": zod.number().optional(),
+  "paymentUrl": zod.string().describe('Open in the system browser to pay (Airpay hosted page)')
 })
 
 
@@ -284,6 +291,10 @@ export const ListMyStoreOrdersResponseItem = zod.object({
   "id": zod.number(),
   "totalInr": zod.number(),
   "pointsRedeemedInr": zod.number(),
+  "subtotalInr": zod.number().optional(),
+  "cgstInr": zod.number().optional(),
+  "sgstInr": zod.number().optional(),
+  "shippingInr": zod.number().optional(),
   "paymentMethod": zod.string(),
   "status": zod.string().describe('placed | confirmed | shipped | delivered | cancelled'),
   "createdAt": zod.string(),
@@ -795,6 +806,8 @@ export const createTrainerBookingBodyNameMin = 2;
 
 export const createTrainerBookingBodyMobileMin = 10;
 
+export const createTrainerBookingBodyRedeemPointsMin = 0;
+
 
 
 export const CreateTrainerBookingBody = zod.object({
@@ -805,7 +818,8 @@ export const CreateTrainerBookingBody = zod.object({
   "name": zod.string().min(createTrainerBookingBodyNameMin),
   "mobile": zod.string().min(createTrainerBookingBodyMobileMin),
   "preferredDate": zod.string().describe('ISO date (YYYY-MM-DD)'),
-  "couponCode": zod.string().optional().describe('Optional coupon code — validated and applied server-side')
+  "couponCode": zod.string().optional().describe('Optional coupon code — validated and applied server-side'),
+  "redeemPoints": zod.number().min(createTrainerBookingBodyRedeemPointsMin).optional().describe('Wallet points (₹) to apply as a discount — clamped server-side, at least ₹1 stays payable')
 })
 
 export const CreateTrainerBookingResponse = zod.object({
@@ -1237,7 +1251,7 @@ export const GetMyReferralInfoResponse = zod.object({
   "id": zod.number(),
   "label": zod.string(),
   "amountInr": zod.number().describe('Positive = credit, negative = debit'),
-  "kind": zod.enum(['cashback', 'referral', 'refund', 'debit', 'topup']),
+  "kind": zod.enum(['cashback', 'referral', 'refund', 'debit', 'topup', 'credit', 'signup_bonus']),
   "createdAt": zod.coerce.date()
 }))
 })
@@ -1266,7 +1280,7 @@ export const ApplyReferralCodeResponse = zod.object({
   "id": zod.number(),
   "label": zod.string(),
   "amountInr": zod.number().describe('Positive = credit, negative = debit'),
-  "kind": zod.enum(['cashback', 'referral', 'refund', 'debit', 'topup']),
+  "kind": zod.enum(['cashback', 'referral', 'refund', 'debit', 'topup', 'credit', 'signup_bonus']),
   "createdAt": zod.coerce.date()
 }))
 })
@@ -1439,7 +1453,7 @@ export const GetWalletResponse = zod.object({
   "id": zod.number(),
   "label": zod.string(),
   "amountInr": zod.number().describe('Positive = credit, negative = debit'),
-  "kind": zod.enum(['cashback', 'referral', 'refund', 'debit', 'topup']),
+  "kind": zod.enum(['cashback', 'referral', 'refund', 'debit', 'topup', 'credit', 'signup_bonus']),
   "createdAt": zod.coerce.date()
 }))
 })

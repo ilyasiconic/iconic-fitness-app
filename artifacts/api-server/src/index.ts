@@ -1,6 +1,7 @@
 import app from "./app";
 import { logger } from "./lib/logger";
 import { ensureSessionTable } from "./lib/adminAuth";
+import { ensureStoreColumns } from "./routes/store";
 
 const rawPort = process.env["PORT"];
 
@@ -18,6 +19,14 @@ if (Number.isNaN(port) || port <= 0) {
 
 async function main(): Promise<void> {
   await ensureSessionTable();
+  // Additive store columns (payment + GST/shipping) must exist before any
+  // route selects from products/product_orders — run before listen so a
+  // freshly published database self-migrates ahead of the first request.
+  try {
+    await ensureStoreColumns();
+  } catch (err) {
+    logger.error({ err }, "Could not ensure store columns");
+  }
 
   app.listen(port, (err) => {
     if (err) {

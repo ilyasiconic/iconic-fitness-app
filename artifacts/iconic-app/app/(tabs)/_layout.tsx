@@ -55,13 +55,14 @@ export default function TabsLayout() {
         tabBarActiveTintColor: colors.primary,
         tabBarInactiveTintColor: colors.mutedForeground,
         tabBarStyle: {
-          backgroundColor: colors.background, // Match premium dark theme seamlessly
-          borderTopColor: colors.border,
-          borderTopWidth: StyleSheet.hairlineWidth,
+          backgroundColor: colors.card,
+          borderTopColor: colors.background === "#000000" || colors.background === "#121212" ? "transparent" : colors.border,
+          borderTopWidth: colors.background === "#000000" || colors.background === "#121212" ? 0 : StyleSheet.hairlineWidth,
           height: (Platform.OS === "ios" ? 60 : 64) + bottomInset,
           paddingTop: 8,
           paddingBottom: bottomInset,
           elevation: 0, // Remove android shadow for flatter premium look
+          shadowOpacity: 0,
         },
         tabBarLabelStyle: {
           fontFamily: "Inter_600SemiBold",

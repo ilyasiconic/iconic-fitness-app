@@ -21,6 +21,7 @@
 - [Inline autoplay YouTube (Expo web+native)](rn-inline-youtube-autoplay.md) — platform-split .web.tsx iframe / .tsx react-native-webview, mute=1 to autoplay, pointerEvents:none so carousel swipe/tap still work; web insets.top===0.
 - [Brand button gradient](brand-button-gradient.md) — iconic-app primary buttons use `primaryGradient` token (LinearGradient fill) + white text; edit the token to restyle all; non-buttons stay flat.
 - [AI coach assessment tool writes](ai-assessment-tool-writes.md) — multi-turn LLM assessment save: merge (don't replace) JSON blob, gate completion stamp on core fields + idempotent, use nullable col as completion signal.
+- [GitHub push path](github-push-path.md) — push via Contents API to the fork `ilyashumfans-rgb/iconic-fitness-app` (connection has no write on the original repo); EAS builds must point at the fork.
 - [YoActiv API integration](yoactiv-integration.md) — POST + API_Key/Branch_Id headers, `Mobile_No` field, key secrets pasted in swapped slots → keys auto-assigned by live probing.
 - [YoActiv branch scoping strictness](yoactiv-branch-scoping.md) — gym-scoped packages/payments/rosters must never fall back to a default branch; unmapped gym = empty + enquiry fallback.
 - [Expo notification sound + delivery](expo-notification-sound-delivery.md) — no push in Expo Go: poll /notifications/mine + fire LOCAL notif on per-user id delta; sound needs handler shouldPlaySound + Android channel.
@@ -41,4 +42,6 @@
 - [API micro-cache + perf setup](api-microcache.md) — 30s in-process cache on public GETs only; compression on; perf indexes applied to dev DB but NOT prod yet.
 - [Class sessions lazy generation](class-sessions-lazy-generation.md) — seeded sessions go stale; upcoming classes are materialised on read from the gym timetable (no background jobs).
 - [Coupon redemption settlement](coupon-redemption-settlement.md) — snapshot couponId at checkout, consume only at paid-flip via unique index + conditional used_count bump; coupon before points, ≥₹1 payable.
+- [Airpay store payments](airpay-store-payments.md) — oauth2 form-encoded body; key = md5(user~:~pass); creds working since Aug 2026; new secrets need workflow restart.
+- [RN persisted query cache — public-only](rn-query-cache-persist.md) — persist ONLY whitelisted public catalog queries to AsyncStorage; personal data memory-only (shared-device leak).
 - [Mobile + password login](mobile-password-login.md) — server verifies password + returns Clerk sign-in ticket; never expose account email publicly; reset = user types own email.

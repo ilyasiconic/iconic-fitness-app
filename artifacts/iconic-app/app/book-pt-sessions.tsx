@@ -21,9 +21,10 @@ import { Field } from "@/components/Field";
 import { CouponInput, type AppliedCoupon } from "@/components/CouponInput";
 import { ModalHeader } from "@/components/ModalHeader";
 import { Screen } from "@/components/Screen";
-import { Chip, EmptyState, ErrorView, LoadingView } from "@/components/ui-bits";
+import { EmptyState, ErrorView, LoadingView } from "@/components/ui-bits";
+import { CalendarPicker } from "@/components/DateTimePickers";
 import { useColors } from "@/hooks/useColors";
-import { istDateInNDays, istDateLabel, istToday } from "@/lib/dates";
+import { istDateLabel, istToday } from "@/lib/dates";
 import { openPayment } from "@/lib/links";
 
 // Paid PT session packages for the member's branch: live prices from the
@@ -70,11 +71,10 @@ export default function BookPtSessionsScreen() {
     },
   });
 
-  const dateOptions = [istToday(), istDateInNDays(1), istDateInNDays(2)];
   const [pkgId, setPkgId] = useState<number | null>(null);
   const [name, setName] = useState("");
   const [phone, setPhone] = useState("");
-  const [date, setDate] = useState(dateOptions[0]);
+  const [date, setDate] = useState(istToday());
   const [busy, setBusy] = useState(false);
   const [coupon, setCoupon] = useState<AppliedCoupon | null>(null);
   const [bookingId, setBookingId] = useState<number | null>(null);
@@ -369,16 +369,10 @@ export default function BookPtSessionsScreen() {
           >
             Start date
           </AppText>
-          <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
-            {dateOptions.map((d) => (
-              <Chip
-                key={d}
-                label={istDateLabel(d)}
-                active={d === date}
-                onPress={() => setDate(d)}
-              />
-            ))}
-          </View>
+          <CalendarPicker value={date} onChange={setDate} />
+          <AppText muted size={11} style={{ marginTop: 6 }}>
+            Selected: {istDateLabel(date)}
+          </AppText>
 
           <CouponInput
             amountInr={selectedPkg ? selectedPkg.amountInr : null}

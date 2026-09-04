@@ -20,13 +20,26 @@ type Order = {
   shippingCity: string;
   shippingPincode: string;
   totalInr: number;
+  pointsRedeemedInr?: number;
+  subtotalInr?: number;
+  cgstInr?: number;
+  sgstInr?: number;
+  shippingInr?: number;
   paymentMethod: string;
   status: string;
   createdAt: string;
   items: OrderItem[];
 };
 
-const STATUSES = ["placed", "confirmed", "shipped", "delivered", "cancelled"];
+const STATUSES = [
+  "payment_pending",
+  "payment_failed",
+  "placed",
+  "confirmed",
+  "shipped",
+  "delivered",
+  "cancelled",
+];
 
 export default function AdminOrders() {
   const [rows, setRows] = useState<Order[]>([]);
@@ -75,6 +88,19 @@ export default function AdminOrders() {
                   <div className="text-2xl font-extrabold text-white">
                     ₹{o.totalInr.toLocaleString("en-IN")}
                   </div>
+                  {(o.subtotalInr ?? 0) > 0 && (
+                    <div className="text-[11px] text-slate-400 mt-1 space-y-0.5">
+                      <div>Subtotal ₹{(o.subtotalInr ?? 0).toLocaleString("en-IN")}</div>
+                      {(o.cgstInr ?? 0) > 0 && <div>CGST ₹{o.cgstInr}</div>}
+                      {(o.sgstInr ?? 0) > 0 && <div>SGST ₹{o.sgstInr}</div>}
+                      {(o.shippingInr ?? 0) > 0 && (
+                        <div>Shipping ₹{o.shippingInr}</div>
+                      )}
+                      {(o.pointsRedeemedInr ?? 0) > 0 && (
+                        <div>Points −₹{o.pointsRedeemedInr}</div>
+                      )}
+                    </div>
+                  )}
                   <div className="text-[10px] uppercase tracking-wider text-slate-500 mt-0.5">
                     {o.paymentMethod}
                   </div>

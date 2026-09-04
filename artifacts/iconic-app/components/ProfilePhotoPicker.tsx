@@ -119,10 +119,15 @@ export function useProfilePhotoUpload() {
   }
 
   async function pickFromGallery() {
-    const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (!perm.granted) {
-      notifyPermissionDenied("Allow photo access to choose a picture.", perm.canAskAgain);
-      return;
+    // Android's system Photo Picker grants access only to the image selected by
+    // the user, so broad READ_MEDIA_* permissions are neither needed nor
+    // permitted by Google Play for this occasional profile-photo use case.
+    if (Platform.OS === "ios") {
+      const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (!perm.granted) {
+        notifyPermissionDenied("Allow photo access to choose a picture.", perm.canAskAgain);
+        return;
+      }
     }
     const result = await ImagePicker.launchImageLibraryAsync(PICKER_OPTIONS);
     const uri = result.canceled ? null : result.assets?.[0]?.uri;

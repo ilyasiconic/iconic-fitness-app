@@ -9,9 +9,20 @@ type Staff = {
   name: string;
   email: string;
   username: string | null;
+  gymId: number | null;
+  gymName: string | null;
+  yoactivStaffId: string | null;
   isActive: boolean;
   permissions: string[];
   createdAt: string;
+};
+
+type StaffBranch = {
+  gymId: number;
+  gymName: string;
+  gymArea: string;
+  yoactivBranchId: number | null;
+  label: string;
 };
 
 const ALL_PERMS = [
@@ -68,20 +79,30 @@ function PermissionCheckboxes({
   );
 }
 
-export type StaffPrefill = { name: string; email: string | null; seq: number };
+export type StaffPrefill = {
+  name: string;
+  email: string | null;
+  gymId: number | null;
+  yoactivStaffId: string;
+  seq: number;
+};
 
 function CreateStaffForm({
   onCreated,
   prefill,
+  branches,
 }: {
   onCreated: () => void;
   prefill: StaffPrefill | null;
+  branches: StaffBranch[];
 }) {
   const [f, setF] = useState({
     name: "",
     email: "",
     username: "",
     password: "",
+    gymId: "",
+    yoactivStaffId: "",
     permissions: [] as string[],
   });
   const [busy, setBusy] = useState(false);
@@ -105,6 +126,11 @@ function CreateStaffForm({
       ...prev,
       name: prefill.name,
       email: prefill.email ?? prev.email,
+      gymId: prefill.gymId ? String(prefill.gymId) : prev.gymId,
+      yoactivStaffId: prefill.yoactivStaffId,
+      permissions: prev.permissions.includes("pt.manage")
+        ? prev.permissions
+        : [...prev.permissions, "pt.manage"],
     }));
     cardRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
     emailRef.current?.focus();
@@ -120,6 +146,8 @@ function CreateStaffForm({
         email: f.email,
         username: f.username.trim() || undefined,
         password: f.password,
+        gymId: f.gymId ? Number(f.gymId) : null,
+        yoactivStaffId: f.yoactivStaffId || null,
         permissions: f.permissions,
         isActive: true,
       });
@@ -134,7 +162,15 @@ function CreateStaffForm({
         password: f.password,
       });
       setCopied(false);
-      setF({ name: "", email: "", username: "", password: "", permissions: [] });
+      setF({
+        name: "",
+        email: "",
+        username: "",
+        password: "",
+        gymId: "",
+        yoactivStaffId: "",
+        permissions: [],
+      });
       onCreated();
       setTimeout(() => setOk(false), 1500);
     } catch (e) {
@@ -205,6 +241,27 @@ function CreateStaffForm({
               onChange={(e) => setF({ ...f, password: e.target.value })}
               placeholder="At least 6 characters"
             />
+          </div>
+          <div className="sm:col-span-2">
+            <label className="text-xs uppercase tracking-wide text-slate-400 block mb-1.5">
+              Branch <span className="text-red-400 normal-case">(required)</span>
+            </label>
+            <select
+              className={inputCls}
+              value={f.gymId}
+              required
+              onChange={(e) => setF({ ...f, gymId: e.target.value })}
+            >
+              <option value="">Select branch</option>
+              {branches.map((b) => (
+                <option key={b.gymId} value={b.gymId}>
+                  {b.label}
+                </option>
+              ))}
+            </select>
+            <div className="text-[11px] text-slate-500 mt-1">
+              Active PT staff appear only in this branch inside the mobile app.
+            </div>
           </div>
         </div>
         <div>
@@ -301,7 +358,12 @@ function CreateStaffForm({
   );
 }
 
-type YoactivBranch = { branchId: number; branchName: string | null };
+type YoactivBranch = {
+  branchId: number;
+  gymId: number | null;
+  branchName: string | null;
+  gymLabel: string | null;
+};
 type YoactivRosterMember = {
   id: string;
   name: string;
@@ -322,9 +384,20 @@ type RoleFilter = "all" | "trainer" | "staff";
 function YoactivTrainersPanel({
   staffRows,
   onCreateLogin,
+  onLinkLogin,
 }: {
   staffRows: Staff[];
-  onCreateLogin: (name: string, email: string | null) => void;
+  onCreateLogin: (
+    name: string,
+    email: string | null,
+    gymId: number | null,
+    yoactivStaffId: string,
+  ) => void;
+  onLinkLogin: (
+    staff: Staff,
+    gymId: number,
+    yoactivStaffId: string,
+  ) => Promise<void>;
 }) {
   const [branches, setBranches] = useState<YoactivBranch[]>([]);
   const [branchId, setBranchId] = useState<number | null>(null);
@@ -353,10 +426,6 @@ function YoactivTrainersPanel({
       .catch(() => setErr("Couldn't load the staff roster"))
       .finally(() => setLoading(false));
   }, [branchId]);
-
-  const staffByName = new Map(
-    staffRows.map((s) => [s.name.trim().toLowerCase(), s]),
-  );
 
   const counts = {
     all: roster.length,
@@ -400,7 +469,7 @@ function YoactivTrainersPanel({
           >
             {branches.map((b) => (
               <option key={b.branchId} value={b.branchId}>
-                {b.branchName ?? `Branch ${b.branchId}`}
+                {b.gymLabel ?? b.branchName ?? `Branch ${b.branchId}`}
               </option>
             ))}
           </select>
@@ -415,8 +484,8 @@ function YoactivTrainersPanel({
         YoActiv shares only each person's name and mobile — email IDs and
         passwords are never stored in YoActiv, and it doesn't label exact
         designations, so people are grouped as Trainers (PT roster) and Other
-        staff. Login details live here: a green badge means they already have
-        one (shown with their email / username). For the rest, press{" "}
+        staff. Login details live here: an Active or Inactive badge means the
+        trainer is already linked to this branch. For the rest, press{" "}
         <span className="text-slate-300">Create login</span>, add their email
         ID (copy it from Gym Members → View Active if they're also a member)
         and set a password.
@@ -435,7 +504,24 @@ function YoactivTrainersPanel({
       ) : (
         <ul className="divide-y divide-slate-800/60">
           {visible.map((t) => {
-            const existing = staffByName.get(t.name.trim().toLowerCase());
+            const selectedBranch = branches.find((b) => b.branchId === branchId);
+            const existing =
+              staffRows.find(
+                (s) =>
+                  s.yoactivStaffId === t.id &&
+                  s.gymId === selectedBranch?.gymId,
+              ) ??
+              [...staffRows]
+                .reverse()
+                .find(
+                  (s) =>
+                    !s.yoactivStaffId &&
+                    s.name.trim().toLowerCase() ===
+                      t.name.trim().toLowerCase(),
+                );
+            const linked =
+              existing?.yoactivStaffId === t.id &&
+              existing.gymId === selectedBranch?.gymId;
             return (
               <li
                 key={t.id}
@@ -481,22 +567,56 @@ function YoactivTrainersPanel({
                 </div>
                 {existing ? (
                   <div className="text-right">
-                    <span className="text-[11px] px-2 py-0.5 rounded-md bg-emerald-500/10 text-emerald-300 border border-emerald-500/30">
-                      Has login
-                    </span>
+                    {linked ? (
+                      <span
+                        className={`text-[11px] px-2 py-0.5 rounded-md border ${
+                          existing.isActive
+                            ? "bg-emerald-500/10 text-emerald-300 border-emerald-500/30"
+                            : "bg-slate-700/60 text-slate-400 border-slate-600"
+                        }`}
+                      >
+                        {existing.isActive ? "Active login" : "Inactive login"}
+                      </span>
+                    ) : selectedBranch?.gymId ? (
+                      <button
+                        type="button"
+                        onClick={() =>
+                          void onLinkLogin(existing, selectedBranch.gymId!, t.id)
+                        }
+                        className="text-xs px-3 py-1.5 rounded bg-sky-500/15 text-sky-200 font-semibold border border-sky-500/35 hover:bg-sky-500/25"
+                      >
+                        Link to this branch
+                      </button>
+                    ) : (
+                      <span className="text-[11px] text-amber-300">
+                        Map this gym to YoActiv first
+                      </span>
+                    )}
                     <div className="text-[11px] text-slate-400 mt-1 font-mono truncate max-w-[180px]">
                       {existing.username
                         ? `@${existing.username}`
                         : existing.email}
                     </div>
                   </div>
-                ) : (
+                ) : selectedBranch?.gymId ? (
                   <button
-                    onClick={() => onCreateLogin(t.name.trim(), t.memberEmail)}
+                    type="button"
+                    onClick={() =>
+                      onCreateLogin(
+                        t.name.trim(),
+                        t.memberEmail,
+                        selectedBranch?.gymId ?? null,
+                        t.id,
+                      )
+                    }
                     className="text-xs px-3 py-1.5 rounded bg-lime-500/20 text-black font-semibold border border-lime-500/40 hover:bg-lime-500/30 shrink-0"
                   >
                     Create login
                   </button>
+                ) : (
+                  <span className="text-[11px] text-amber-300 text-right max-w-[150px]">
+                    Map this gym to YoActiv first
+                  </span>
                 )}
               </li>
             );
@@ -507,10 +627,19 @@ function YoactivTrainersPanel({
   );
 }
 
-function EditStaffRow({ row, onChanged }: { row: Staff; onChanged: () => void }) {
+function EditStaffRow({
+  row,
+  onChanged,
+  branches,
+}: {
+  row: Staff;
+  onChanged: () => void;
+  branches: StaffBranch[];
+}) {
   const [editing, setEditing] = useState(false);
   const [name, setName] = useState(row.name);
   const [username, setUsername] = useState(row.username ?? "");
+  const [gymId, setGymId] = useState(row.gymId ? String(row.gymId) : "");
   const [editErr, setEditErr] = useState<string | null>(null);
   const [perms, setPerms] = useState<string[]>(row.permissions ?? []);
   const [isActive, setIsActive] = useState(row.isActive);
@@ -530,6 +659,7 @@ function EditStaffRow({ row, onChanged }: { row: Staff; onChanged: () => void })
       await adminApi.staff.update(row.id, {
         name,
         username: username.trim() || null,
+        gymId: gymId ? Number(gymId) : null,
         permissions: perms,
         isActive,
       });
@@ -609,6 +739,18 @@ function EditStaffRow({ row, onChanged }: { row: Staff; onChanged: () => void })
               onChange={(e) => setUsername(e.target.value)}
               placeholder="Username (optional)"
             />
+            <select
+              className={inputCls}
+              value={gymId}
+              onChange={(e) => setGymId(e.target.value)}
+            >
+              <option value="">Select branch</option>
+              {branches.map((b) => (
+                <option key={b.gymId} value={b.gymId}>
+                  {b.label}
+                </option>
+              ))}
+            </select>
             {editErr && (
               <div className="text-xs text-red-400">{editErr}</div>
             )}
@@ -617,6 +759,11 @@ function EditStaffRow({ row, onChanged }: { row: Staff; onChanged: () => void })
           <div className="font-medium text-white">{row.name}</div>
         )}
         <div className="text-xs text-slate-400 mt-1">{row.email}</div>
+        {!editing && (
+          <div className="text-[11px] text-sky-600 mt-0.5">
+            {row.gymName ?? "No branch assigned"}
+          </div>
+        )}
         {!editing && row.username ? (
           <div className="text-[11px] text-lime-300/80 mt-0.5 font-mono">
             @{row.username}
@@ -683,7 +830,7 @@ function EditStaffRow({ row, onChanged }: { row: Staff; onChanged: () => void })
             <div className="flex gap-2">
               <button
                 onClick={save}
-                disabled={busy}
+                disabled={busy || !gymId}
                 className="text-xs px-3 py-1.5 rounded bg-lime-500/20 text-lime-300 border border-lime-500/40 hover:bg-lime-500/30 disabled:opacity-60"
               >
                 Save
@@ -692,6 +839,7 @@ function EditStaffRow({ row, onChanged }: { row: Staff; onChanged: () => void })
                 onClick={() => {
                   setName(row.name);
                   setUsername(row.username ?? "");
+                  setGymId(row.gymId ? String(row.gymId) : "");
                   setPerms(row.permissions ?? []);
                   setIsActive(row.isActive);
                   setEditErr(null);
@@ -704,6 +852,7 @@ function EditStaffRow({ row, onChanged }: { row: Staff; onChanged: () => void })
             </div>
           ) : (
             <button
+              type="button"
               onClick={() => setEditing(true)}
               className="text-xs px-3 py-1.5 rounded bg-slate-700/60 text-slate-200 border border-slate-600/60 hover:border-lime-500/40 w-fit"
             >
@@ -746,6 +895,7 @@ function EditStaffRow({ row, onChanged }: { row: Staff; onChanged: () => void })
             </div>
           ) : (
             <button
+              type="button"
               onClick={() => {
                 setNewUsername(row.username ?? "");
                 setChangingUser(true);
@@ -783,6 +933,7 @@ function EditStaffRow({ row, onChanged }: { row: Staff; onChanged: () => void })
             </div>
           ) : (
             <button
+              type="button"
               onClick={() => setResetting(true)}
               className="text-xs px-3 py-1.5 rounded bg-slate-700/60 text-slate-200 border border-slate-600/60 hover:border-lime-500/40 inline-flex items-center gap-1 w-fit"
             >
@@ -838,13 +989,25 @@ function EditStaffRow({ row, onChanged }: { row: Staff; onChanged: () => void })
 
 export default function AdminStaffManagement() {
   const [rows, setRows] = useState<Staff[]>([]);
+  const [branches, setBranches] = useState<StaffBranch[]>([]);
+  const [yoactivBranches, setYoactivBranches] = useState<YoactivBranch[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [prefill, setPrefill] = useState<StaffPrefill | null>(null);
+  const [branchFilter, setBranchFilter] = useState("all");
+  const [statusFilter, setStatusFilter] = useState<
+    "active" | "inactive" | "all"
+  >("active");
 
   const load = async () => {
+    setLoadError(null);
     try {
       const data = (await adminApi.staff.list()) as Staff[];
       setRows(data);
+    } catch (e) {
+      setLoadError(
+        e instanceof Error ? e.message : "Couldn't load staff members",
+      );
     } finally {
       setLoading(false);
     }
@@ -852,26 +1015,113 @@ export default function AdminStaffManagement() {
 
   useEffect(() => {
     void load();
+    adminApi.staff
+      .branches()
+      .then((data) => setBranches(data as StaffBranch[]))
+      .catch(() => setBranches([]));
+    adminApi.yoactiv
+      .branches()
+      .then((data) => setYoactivBranches(data as YoactivBranch[]))
+      .catch(() => setYoactivBranches([]));
   }, []);
+
+  const filteredRows = rows.filter((row) => {
+    const branchMatches =
+      branchFilter === "all"
+        ? true
+        : branchFilter === "unassigned"
+          ? row.gymId === null
+          : row.gymId ===
+            (yoactivBranches.find(
+              (branch) => branch.branchId === Number(branchFilter),
+            )?.gymId ?? -1);
+    const statusMatches =
+      statusFilter === "all"
+        ? true
+        : statusFilter === "active"
+          ? row.isActive
+          : !row.isActive;
+    return branchMatches && statusMatches;
+  });
 
   return (
     <AdminLayout title="Staff Management">
       <div className="space-y-6">
-        <CreateStaffForm onCreated={load} prefill={prefill} />
+        <CreateStaffForm
+          onCreated={load}
+          prefill={prefill}
+          branches={branches}
+        />
 
         <YoactivTrainersPanel
           staffRows={rows}
-          onCreateLogin={(name, email) =>
-            setPrefill((p) => ({ name, email, seq: (p?.seq ?? 0) + 1 }))
+          onCreateLogin={(name, email, gymId, yoactivStaffId) =>
+            setPrefill((p) => ({
+              name,
+              email,
+              gymId,
+              yoactivStaffId,
+              seq: (p?.seq ?? 0) + 1,
+            }))
           }
+          onLinkLogin={async (staff, gymId, yoactivStaffId) => {
+            try {
+              await adminApi.staff.update(staff.id, {
+                gymId,
+                yoactivStaffId,
+                permissions: staff.permissions.includes("pt.manage")
+                  ? staff.permissions
+                  : [...staff.permissions, "pt.manage"],
+              });
+              await load();
+            } catch (e) {
+              window.alert(
+                e instanceof Error
+                  ? e.message
+                  : "Couldn't link this trainer to the branch",
+              );
+            }
+          }}
         />
 
         <AdminCard className="p-0 overflow-hidden">
-          <div className="px-5 py-4 border-b border-slate-800 flex items-center justify-between">
+          <div className="px-5 py-4 border-b border-slate-800 flex flex-wrap items-center justify-between gap-3">
             <h2 className="text-sm font-bold uppercase tracking-wider text-slate-300">
               Staff Members
             </h2>
-            <span className="text-xs text-slate-500">{rows.length} total</span>
+            <div className="flex flex-wrap items-center gap-2">
+              <select
+                className="px-3 py-1.5 rounded-lg bg-white border border-slate-300 text-sm text-black"
+                value={branchFilter}
+                onChange={(e) => setBranchFilter(e.target.value)}
+              >
+                <option value="all">All branches</option>
+                {yoactivBranches.map((b) => (
+                  <option key={b.branchId} value={b.branchId}>
+                    {b.branchName ??
+                      b.gymLabel ??
+                      `Branch ${b.branchId}`}
+                  </option>
+                ))}
+                <option value="unassigned">No branch assigned</option>
+              </select>
+              <select
+                className="px-3 py-1.5 rounded-lg bg-white border border-slate-300 text-sm text-black"
+                value={statusFilter}
+                onChange={(e) =>
+                  setStatusFilter(
+                    e.target.value as "active" | "inactive" | "all",
+                  )
+                }
+              >
+                <option value="active">Active only</option>
+                <option value="inactive">Inactive only</option>
+                <option value="all">Active and inactive</option>
+              </select>
+              <span className="text-xs text-slate-500">
+                {filteredRows.length} shown / {rows.length} total
+              </span>
+            </div>
           </div>
           <div className="overflow-x-auto">
             <table className="w-full min-w-[640px] text-sm">
@@ -884,21 +1134,32 @@ export default function AdminStaffManagement() {
                 </tr>
               </thead>
               <tbody>
-                {loading ? (
+                {loadError ? (
+                  <tr>
+                    <td colSpan={4} className="px-5 py-8 text-center text-red-500">
+                      {loadError}. Refresh the page or sign in again.
+                    </td>
+                  </tr>
+                ) : loading ? (
                   <tr>
                     <td colSpan={4} className="px-5 py-8 text-center text-slate-500">
                       Loading…
                     </td>
                   </tr>
-                ) : rows.length === 0 ? (
+                ) : filteredRows.length === 0 ? (
                   <tr>
                     <td colSpan={4} className="px-5 py-8 text-center text-slate-500">
                       No staff members yet. Create one above.
                     </td>
                   </tr>
                 ) : (
-                  rows.map((r) => (
-                    <EditStaffRow key={r.id} row={r} onChanged={load} />
+                  filteredRows.map((r) => (
+                    <EditStaffRow
+                      key={r.id}
+                      row={r}
+                      onChanged={load}
+                      branches={branches}
+                    />
                   ))
                 )}
               </tbody>

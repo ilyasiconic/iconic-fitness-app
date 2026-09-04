@@ -153,14 +153,24 @@ export default function Profile() {
               <h3 className="font-bold flex items-center text-lg">
                 <BadgeCheck className="h-5 w-5 mr-2 text-primary" /> My membership
               </h3>
-              <Button
-                variant="outline"
-                size="sm"
-                className="font-bold"
-                onClick={() => navigate("/invoices")}
-              >
-                View invoices
-              </Button>
+              <div className="flex gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="font-bold"
+                  onClick={() => navigate("/orders")}
+                >
+                  My orders
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="font-bold"
+                  onClick={() => navigate("/invoices")}
+                >
+                  View invoices
+                </Button>
+              </div>
             </div>
             <div className="flex flex-col sm:flex-row gap-6 items-start">
               <div className="h-20 w-20 rounded-full bg-secondary overflow-hidden shrink-0">

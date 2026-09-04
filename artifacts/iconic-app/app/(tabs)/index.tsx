@@ -1,4 +1,5 @@
 import { useAuth } from "@clerk/expo";
+import { useGuest } from "@/hooks/useGuest";
 import { Feather } from "@expo/vector-icons";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import {
@@ -25,6 +26,8 @@ import {
   useListMyTrainerBookings,
   useGetMyPtProgram,
   getGetMyPtProgramQueryKey,
+  useGetMyReferralInfo,
+  getGetMyReferralInfoQueryKey,
   useListHomeSlides,
   useListPackageCategories,
   getListPackageCategoriesQueryKey,
@@ -171,6 +174,8 @@ function NoMembershipCard({
   memberName: string;
   onViewPlans: () => void;
 }) {
+  const colors = useColors();
+  const PREMIUM = getPremiumColors(colors);
   const initials = (memberName || "M")
     .split(/\s+/)
     .map((w) => w[0] ?? "")
@@ -184,18 +189,18 @@ function NoMembershipCard({
         colors={[PREMIUM.bgTop, PREMIUM.bgBottom]}
         start={{ x: 0, y: 0 }}
         end={{ x: 0.6, y: 1 }}
-        style={[styles.premiumCard, styles.noPlanCard]}
+        style={[styles.premiumCard, styles.noPlanCard, { borderColor: PREMIUM.hairline }]}
       >
         {/* Gold sheen sweeping the top edge */}
         <LinearGradient
-          colors={["transparent", PREMIUM.gold + "2E", "transparent"]}
+          colors={["transparent", PREMIUM.gold + (colors.background === "#000000" || colors.background === "#121212" ? "2E" : "15"), "transparent"]}
           start={{ x: 0, y: 0 }}
           end={{ x: 1, y: 0.4 }}
           style={[StyleSheet.absoluteFill, { pointerEvents: "none" }]}
         />
         {/* Soft glow bottom-right */}
         <LinearGradient
-          colors={["transparent", PREMIUM.gold + "14"]}
+          colors={["transparent", PREMIUM.gold + (colors.background === "#000000" || colors.background === "#121212" ? "14" : "0A")]}
           start={{ x: 0, y: 0 }}
           end={{ x: 1, y: 1 }}
           style={[StyleSheet.absoluteFill, { pointerEvents: "none" }]}
@@ -225,7 +230,7 @@ function NoMembershipCard({
           </View>
         </View>
 
-        <View style={styles.noPlanHairline} />
+        <View style={[styles.noPlanHairline, { backgroundColor: PREMIUM.hairline }]} />
 
         <View
           style={{
@@ -234,8 +239,8 @@ function NoMembershipCard({
             gap: 14,
           }}
         >
-          <View style={styles.noPlanAvatarRing}>
-            <View style={styles.noPlanAvatar}>
+          <View style={[styles.noPlanAvatarRing, { borderColor: PREMIUM.gold + "66" }]}>
+            <View style={[styles.noPlanAvatar, { borderColor: PREMIUM.hairline, backgroundColor: PREMIUM.hairline }]}>
               <AppText weight="700" size={17} color={PREMIUM.gold}>
                 {initials}
               </AppText>
@@ -260,14 +265,14 @@ function NoMembershipCard({
           onPress={onViewPlans}
           style={({ pressed }) => [
             styles.noPlanCta,
-            { opacity: pressed ? 0.85 : 1 },
+            { backgroundColor: PREMIUM.gold, opacity: pressed ? 0.85 : 1 },
           ]}
         >
-          <Feather name="credit-card" size={15} color="#0A0C08" />
-          <AppText weight="700" size={14} color="#0A0C08">
+          <Feather name="credit-card" size={15} color={PREMIUM.text} />
+          <AppText weight="700" size={14} color={colors.foreground}>
             View membership plans
           </AppText>
-          <Feather name="arrow-right" size={15} color="#0A0C08" />
+          <Feather name="arrow-right" size={15} color={PREMIUM.text} />
         </Pressable>
       </LinearGradient>
     </View>
@@ -283,41 +288,46 @@ function JoinMembershipBar({
   expired: boolean;
   onJoin: () => void;
 }) {
+  const colors = useColors();
+  const PREMIUM = getPremiumColors(colors);
   return (
     <View style={[styles.joinBarWrap, CARD_SHADOW]}>
       <Pressable
         onPress={onJoin}
         style={({ pressed }) => [
           styles.joinBar,
-          { opacity: pressed ? 0.88 : 1 },
+          { backgroundColor: PREMIUM.gold, opacity: pressed ? 0.88 : 1 },
         ]}
       >
-        <View style={styles.joinBarIcon}>
+        <View style={[styles.joinBarIcon, { backgroundColor: colors.card }]}>
           <Feather name="zap" size={16} color={PREMIUM.gold} />
         </View>
         <View style={{ flex: 1 }}>
-          <AppText weight="700" size={14} color="#0A0C08">
+          <AppText weight="700" size={14} color={colors.foreground}>
             {expired ? "Rejoin your membership" : "Join Iconic membership"}
           </AppText>
-          <AppText size={11} color="rgba(10,12,8,0.7)">
+          <AppText size={11} color={colors.mutedForeground}>
             Choose branch · pick plan · pay online
           </AppText>
         </View>
-        <Feather name="arrow-right" size={18} color="#0A0C08" />
+        <Feather name="arrow-right" size={18} color={colors.foreground} />
       </Pressable>
     </View>
   );
 }
 
-const PREMIUM = {
-  bgTop: "#1A1F14",
-  bgBottom: "#080A06",
-  gold: "#0BE607",
-  goldDeep: "#9EBE00",
-  hairline: "rgba(199,240,0,0.25)",
-  text: "#FFFFFF",
-  faint: "rgba(255,255,255,0.65)",
-};
+function getPremiumColors(colors: any) {
+  const isDark = colors.background === "#000000" || colors.background === "#121212";
+  return {
+    bgTop: isDark ? "#1A1A1C" : colors.card,
+    bgBottom: isDark ? "#050505" : colors.secondary,
+    gold: colors.primary,
+    goldDeep: colors.primaryGradient[1],
+    hairline: isDark ? "rgba(255,255,255,0.08)" : "rgba(0,0,0,0.06)",
+    text: colors.foreground,
+    faint: colors.mutedForeground,
+  };
+}
 
 function MembershipStatusCard({
   membership,
@@ -334,6 +344,8 @@ function MembershipStatusCard({
   /** Render as a slide inside the top card pager: outer margin handled by the pager. */
   embedded?: boolean;
 }) {
+  const colors = useColors();
+  const PREMIUM = getPremiumColors(colors);
   const queryClient = useQueryClient();
   const router = useRouter();
   // Hide "Book PT Trainer" once the member already has any PT booking or
@@ -445,11 +457,11 @@ function MembershipStatusCard({
         colors={[PREMIUM.bgTop, PREMIUM.bgBottom]}
         start={{ x: 0, y: 0 }}
         end={{ x: 0.6, y: 1 }}
-        style={styles.premiumCard}
+        style={[styles.premiumCard, { borderColor: PREMIUM.hairline }]}
       >
         {/* Gold sheen sweeping the top edge */}
         <LinearGradient
-          colors={["transparent", PREMIUM.gold + "2E", "transparent"]}
+          colors={["transparent", PREMIUM.gold + (colors.background === "#000000" || colors.background === "#121212" ? "2E" : "15"), "transparent"]}
           start={{ x: 0, y: 0 }}
           end={{ x: 1, y: 0.4 }}
           style={[StyleSheet.absoluteFill, { pointerEvents: "none" }]}
@@ -473,7 +485,7 @@ function MembershipStatusCard({
                 borderColor: needsRenewal ? alertColor : PREMIUM.hairline,
                 backgroundColor: needsRenewal
                   ? alertColor + "22"
-                  : "rgba(232,197,106,0.12)",
+                  : "rgba(255,255,255,0.06)",
               },
             ]}
           >
@@ -499,7 +511,7 @@ function MembershipStatusCard({
           {/* Tappable avatar: Camera / Gallery chooser to change the photo */}
           <Pressable
             onPress={photo.busy ? undefined : photo.choosePhoto}
-            style={styles.premiumAvatarRing}
+            style={[styles.premiumAvatarRing, { borderColor: PREMIUM.gold }]}
             hitSlop={6}
           >
             {photo.localUrl || memberPhotoUrl || membership.photoUrl ? (
@@ -518,7 +530,7 @@ function MembershipStatusCard({
                 style={[
                   styles.premiumAvatar,
                   {
-                    backgroundColor: "rgba(232,197,106,0.14)",
+                    backgroundColor: PREMIUM.hairline,
                     alignItems: "center",
                     justifyContent: "center",
                   },
@@ -544,7 +556,7 @@ function MembershipStatusCard({
                 <ActivityIndicator color="#fff" size="small" />
               </View>
             ) : (
-              <View style={styles.premiumAvatarCamBadge}>
+              <View style={[styles.premiumAvatarCamBadge, { backgroundColor: PREMIUM.gold }]}>
                 <Feather name="camera" size={10} color="#0B0B0F" />
               </View>
             )}
@@ -574,7 +586,7 @@ function MembershipStatusCard({
           </View>
         </View>
 
-        <View style={styles.premiumDivider} />
+        <View style={[styles.premiumDivider, { backgroundColor: PREMIUM.hairline }]} />
 
         <View style={{ flexDirection: "row" }}>
           <View style={{ flex: 1 }}>
@@ -808,7 +820,12 @@ const SOFT_SHADOW = Platform.select({
 export default function HomeScreen() {
   const colors = useColors();
   const router = useRouter();
-  const { isSignedIn } = useAuth();
+  const { isSignedIn: clerkSignedIn } = useAuth();
+  const { isGuest } = useGuest();
+  // "Continue without login" must behave like a real guest even when a
+  // previous login session is still remembered on the device — otherwise the
+  // guest home shows the member's personal card. Guest mode wins.
+  const isSignedIn = !!clerkSignedIn && !isGuest;
   const queryClient = useQueryClient();
 
   // Public, no-auth content — works for guests and members alike.
@@ -1058,6 +1075,9 @@ export default function HomeScreen() {
 
       {/* Engagement 45-day plan */}
       {isSignedIn ? <EngagementPlanCard /> : null}
+
+      {/* Redeem prizes wallet — points spendable on store, packages & PT */}
+      {isSignedIn ? <WalletRewardsCard /> : null}
 
       {/* Personal tracking — pinned to the top for signed-in members.
           One arrow collapses/expands the whole block (progress + quick log + today). */}
@@ -1797,14 +1817,14 @@ function HeroSlider({
                 {hasText ? (
                   <View style={styles.slideContent}>
                     {s.title ? (
-                      <AppText weight="700" size={24} color="#FFFFFF">
+                      <AppText weight="700" size={24} color={colors.foreground}>
                         {s.title}
                       </AppText>
                     ) : null}
                     {s.subtitle ? (
                       <AppText
                         size={14}
-                        color="rgba(255,255,255,0.85)"
+                        color={colors.mutedForeground}
                         style={{ marginTop: 4 }}
                       >
                         {s.subtitle}
@@ -2136,7 +2156,7 @@ function CategoryCard({
 
   return (
     <View
-      style={[CARD_SHADOW, { borderRadius: 22, backgroundColor: "#0A0C08" }]}
+      style={[CARD_SHADOW, { borderRadius: 22, backgroundColor: colors.card }]}
     >
       <Pressable
         onPress={() =>
@@ -2176,15 +2196,15 @@ function CategoryCard({
           <Feather name="arrow-up-right" size={16} color={colors.primaryForeground} />
         </View>
         <View style={styles.catLabel}>
-          <AppText weight="700" size={16} color="#FFFFFF">
+          <AppText weight="700" size={16} color={colors.cardForeground}>
             {category.name}
           </AppText>
           {count > 0 ? (
-            <AppText size={12} color="#FFFFFF" style={{ opacity: 0.8, marginTop: 2 }}>
+            <AppText size={12} color={colors.mutedForeground} style={{ marginTop: 2 }}>
               {count} {count === 1 ? "item" : "items"}
             </AppText>
           ) : (
-            <AppText size={12} color="#FFFFFF" style={{ opacity: 0.8, marginTop: 2 }}>
+            <AppText size={12} color={colors.mutedForeground} style={{ marginTop: 2 }}>
               Shop now
             </AppText>
           )}
@@ -2244,7 +2264,7 @@ function PackageCategoryTile({
               { alignItems: "center", justifyContent: "center" },
             ]}
           >
-            <Feather name="grid" size={24} color="#0A0C08" />
+            <Feather name="grid" size={24} color={colors.cardForeground} />
           </LinearGradient>
         )}
       </View>
@@ -2498,7 +2518,7 @@ function ClassCard({
           <AppText
             weight="700"
             size={13}
-            color={booked || full ? colors.mutedForeground : "#FFFFFF"}
+            color={booked || full ? colors.mutedForeground : colors.primaryForeground}
           >
             {loading ? "Booking…" : booked ? "Booked ✓" : full ? "Full" : "Book now"}
           </AppText>
@@ -2683,6 +2703,57 @@ function StatCard({
   );
 }
 
+/** Redeem prizes wallet — shows the member's points balance and where to
+ *  spend it (store, membership packages, PT plans). Hidden while loading and
+ *  when the wallet is empty, so the home feed stays clean. */
+function WalletRewardsCard() {
+  const colors = useColors();
+  const router = useRouter();
+  const referralQuery = useGetMyReferralInfo({
+    query: { queryKey: getGetMyReferralInfoQueryKey() },
+  });
+  const balance = referralQuery.data?.balanceInr ?? 0;
+  if (!referralQuery.isSuccess) return null;
+  return (
+    <Pressable onPress={() => router.push("/(tabs)/store")}>
+      <Card
+        style={{
+          marginBottom: 14,
+          flexDirection: "row",
+          alignItems: "center",
+          gap: 12,
+        }}
+      >
+        <View
+          style={{
+            width: 44,
+            height: 44,
+            borderRadius: 22,
+            alignItems: "center",
+            justifyContent: "center",
+            backgroundColor: `${colors.primary}22`,
+          }}
+        >
+          <Feather name="gift" size={22} color={colors.primary} />
+        </View>
+        <View style={{ flex: 1 }}>
+          <AppText weight="700" size={15}>
+            Redeem prizes wallet
+          </AppText>
+          <AppText size={12} color={colors.mutedForeground} style={{ marginTop: 2 }}>
+            {balance > 0
+              ? "Use your points on store orders, memberships & PT plans (₹1 each)"
+              : "Earn points by referring friends — spend them on store, memberships & PT"}
+          </AppText>
+        </View>
+        <AppText weight="700" size={18} color={colors.primary}>
+          {balance.toLocaleString("en-IN")} pts
+        </AppText>
+      </Card>
+    </Pressable>
+  );
+}
+
 const styles = StyleSheet.create({
   header: {
     flexDirection: "row",
@@ -2719,7 +2790,6 @@ const styles = StyleSheet.create({
   },
   noPlanCard: {
     borderWidth: 1,
-    borderColor: PREMIUM.hairline,
     paddingVertical: 20,
   },
   noPlanBadge: {
@@ -2732,7 +2802,6 @@ const styles = StyleSheet.create({
   },
   noPlanHairline: {
     height: StyleSheet.hairlineWidth,
-    backgroundColor: PREMIUM.hairline,
     marginVertical: 14,
   },
   noPlanAvatarRing: {
@@ -2742,7 +2811,6 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     borderWidth: 1,
-    borderColor: PREMIUM.gold + "66",
   },
   noPlanAvatar: {
     width: 46,
@@ -2751,8 +2819,6 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     borderWidth: 1,
-    borderColor: PREMIUM.hairline,
-    backgroundColor: "rgba(255,255,255,0.06)",
   },
   noPlanCta: {
     flexDirection: "row",
@@ -2762,7 +2828,6 @@ const styles = StyleSheet.create({
     marginTop: 14,
     paddingVertical: 12,
     borderRadius: 12,
-    backgroundColor: PREMIUM.gold,
   },
   premiumWrap: {
     marginBottom: 16,
@@ -2782,7 +2847,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     paddingVertical: 12,
     borderRadius: 16,
-    backgroundColor: PREMIUM.gold,
   },
   joinBarIcon: {
     width: 34,
@@ -2790,7 +2854,6 @@ const styles = StyleSheet.create({
     borderRadius: 17,
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: "#0A0C08",
   },
   topPagerWrap: { marginTop: 20, marginBottom: 4 },
   topPagerDots: {
@@ -2806,7 +2869,7 @@ const styles = StyleSheet.create({
     overflow: "hidden",
     padding: 20,
     borderWidth: 1,
-    borderColor: "rgba(232,197,106,0.35)",
+    borderColor: "rgba(255,255,255,0.08)",
   },
   premiumBadge: {
     paddingHorizontal: 10,
@@ -2821,7 +2884,6 @@ const styles = StyleSheet.create({
     width: 18,
     height: 18,
     borderRadius: 9,
-    backgroundColor: PREMIUM.gold,
     alignItems: "center",
     justifyContent: "center",
   },
@@ -2830,7 +2892,6 @@ const styles = StyleSheet.create({
     height: 66,
     borderRadius: 33,
     borderWidth: 2,
-    borderColor: "#E8C56A",
     alignItems: "center",
     justifyContent: "center",
   },
@@ -2841,7 +2902,7 @@ const styles = StyleSheet.create({
   },
   premiumDivider: {
     height: 1,
-    backgroundColor: "rgba(232,197,106,0.18)",
+    backgroundColor: "rgba(255,255,255,0.06)",
     marginVertical: 16,
   },
   premiumRenewStrip: {
@@ -2871,7 +2932,7 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     paddingVertical: 12,
     borderWidth: 1,
-    borderColor: "rgba(232,197,106,0.35)",
+    borderColor: "rgba(255,255,255,0.08)",
   },
   // Shadow lives on the wrapper, clipping on the inner slide (iOS clips a
   // view's own shadow when it also has overflow:hidden).
@@ -2950,7 +3011,6 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     gap: 6,
-    backgroundColor: "#0A0C08",
     paddingHorizontal: 14,
     paddingVertical: 9,
     borderRadius: 999,

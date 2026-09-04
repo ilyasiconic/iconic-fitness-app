@@ -1,9 +1,10 @@
 import { useSignIn, useSSO } from "@clerk/expo";
+import { useSignInWithApple } from "@clerk/expo/apple";
 import { customFetch } from "@workspace/api-client-react";
 import { Feather } from "@expo/vector-icons";
 import * as AuthSession from "expo-auth-session";
 import { LinearGradient } from "expo-linear-gradient";
-import { Link, useRouter } from "expo-router";
+import { Link, useFocusEffect, useRouter } from "expo-router";
 import * as WebBrowser from "expo-web-browser";
 import { useCallback, useEffect, useState } from "react";
 import {
@@ -19,6 +20,7 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { AppText } from "@/components/AppText";
+import { AppleSsoButton } from "@/components/AppleSsoButton";
 import { Button } from "@/components/Button";
 import { Field } from "@/components/Field";
 import { useColors } from "@/hooks/useColors";
@@ -51,22 +53,22 @@ function SignInContent() {
   const insets = useSafeAreaInsets();
   const { signIn, fetchStatus } = useSignIn();
   const { startSSOFlow } = useSSO();
+  const { startAppleAuthenticationFlow } = useSignInWithApple();
   const { enterGuest, exitGuest } = useGuest();
 
   const [email, setEmail] = useState("");
   const [error, setError] = useState<string | null>(null);
-  const [googleLoading, setGoogleLoading] = useState(false);
+  const [ssoLoading, setSsoLoading] = useState<"google" | "apple" | null>(null);
 
   // OTP (one-time email code) login — the only email login flow
   const [otpSent, setOtpSent] = useState(false);
   const [otpCode, setOtpCode] = useState("");
   const [otpInfo, setOtpInfo] = useState<string | null>(null);
 
-  // Mobile + password login. Clerk identifies accounts by email, but members
-  // remember their gym-registered mobile — the server maps mobile → account
-  // email, then Clerk's password / reset-password flows run on that email.
+  // Password login accepts the member's username, email, or gym mobile. The
+  // server resolves it without revealing account details.
   const [mode, setMode] = useState<"otp" | "password">("otp");
-  const [pwMobile, setPwMobile] = useState("");
+  const [pwIdentifier, setPwIdentifier] = useState("");
   const [pwPassword, setPwPassword] = useState("");
   const [pwStage, setPwStage] = useState<"login" | "resetEmail" | "resetVerify">(
     "login",
@@ -76,6 +78,14 @@ function SignInContent() {
   const [newPassword, setNewPassword] = useState("");
   const [pwBusy, setPwBusy] = useState(false);
   const [pwInfo, setPwInfo] = useState<string | null>(null);
+
+  useFocusEffect(
+    useCallback(() => {
+      // Expo Router keeps screens mounted in its stack. Clear any error left
+      // by the previous sign-in attempt when logout reveals this screen again.
+      setError(null);
+    }, []),
+  );
 
   useEffect(() => {
     if (Platform.OS !== "android") return;
@@ -142,9 +152,9 @@ function SignInContent() {
   const onPasswordLogin = useCallback(async () => {
     setError(null);
     setPwInfo(null);
-    const mobile = pwMobile.replace(/\D/g, "");
-    if (mobile.length < 10) {
-      setError("Enter your gym-registered mobile number.");
+    const identifier = pwIdentifier.trim();
+    if (identifier.length < 3) {
+      setError("Enter your username, email, or mobile number.");
       return;
     }
     if (pwPassword.length < 1) {
@@ -160,7 +170,7 @@ function SignInContent() {
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ mobile, password: pwPassword }),
+           body: JSON.stringify({ identifier, password: pwPassword }),
         },
       );
       if (signIn.status !== null) {
@@ -184,12 +194,18 @@ function SignInContent() {
         setError("Additional verification is required to sign in.");
       }
     } catch (err: unknown) {
-      const apiMessage = (err as { body?: { error?: string } })?.body?.error;
+      const apiMessage = (
+        err as {
+          data?: { error?: string };
+          body?: { error?: string };
+        }
+      )?.data?.error ??
+        (err as { body?: { error?: string } })?.body?.error;
       setError(apiMessage ?? clerkError(err));
     } finally {
       setPwBusy(false);
     }
-  }, [signIn, pwMobile, pwPassword, finalizeSignIn]);
+  }, [signIn, pwIdentifier, pwPassword, finalizeSignIn]);
 
   const onStartPasswordReset = useCallback(async () => {
     setError(null);
@@ -211,24 +227,61 @@ function SignInContent() {
       const { error: createError } = await signIn.create({
         identifier: address,
       });
-      if (createError) {
-        setError(clerkError(createError));
-        return;
-      }
-      const { error: sendError } =
+      if (!createError) {
         await signIn.resetPasswordEmailCode.sendCode();
-      if (sendError) {
-        setError(clerkError(sendError));
-        return;
       }
       setPwStage("resetVerify");
       setResetCode("");
       setNewPassword("");
-      setPwInfo(`We emailed a 6-digit code to ${address}.`);
-    } catch (err: unknown) {
-      setError(clerkError(err));
+      setPwInfo(
+        "If an account exists for that email, we sent it a 6-digit reset code.",
+      );
+    } catch {
+      setPwStage("resetVerify");
+      setResetCode("");
+      setNewPassword("");
+      setPwInfo(
+        "If an account exists for that email, we sent it a 6-digit reset code.",
+      );
     } finally {
       setPwBusy(false);
+    }
+  }, [signIn, resetEmail]);
+
+  // The reset attempt can silently go stale (app reload, long pause, or a
+  // mixed-up earlier attempt). Instead of showing Clerk's confusing "send a
+  // verification code before attempting to verify" error, restart the flow
+  // and email a fresh code automatically.
+  const restartResetWithFreshCode = useCallback(async () => {
+    const address = resetEmail.trim();
+    if (!address.includes("@")) {
+      setPwStage("resetEmail");
+      setError("Enter your email again — the session expired.");
+      return;
+    }
+    try {
+      if (signIn.status !== null) {
+        try {
+          await signIn.reset();
+        } catch {
+          // A stale attempt shouldn't block a fresh reset.
+        }
+      }
+      const { error: createError } = await signIn.create({
+        identifier: address,
+      });
+      if (!createError) {
+        await signIn.resetPasswordEmailCode.sendCode();
+      }
+      setResetCode("");
+      setPwInfo(
+        "If an account exists for that email, we sent it a fresh reset code.",
+      );
+    } catch {
+      setResetCode("");
+      setPwInfo(
+        "If an account exists for that email, we sent it a fresh reset code.",
+      );
     }
   }, [signIn, resetEmail]);
 
@@ -244,12 +297,23 @@ function SignInContent() {
     }
     setPwBusy(true);
     try {
+      // If the attempt went stale, don't even try to verify — the typed code
+      // belongs to a dead session. Send a fresh code instead.
+      if (signIn.status === null) {
+        await restartResetWithFreshCode();
+        return;
+      }
       const { error: verifyError } =
         await signIn.resetPasswordEmailCode.verifyCode({
           code: resetCode.trim(),
         });
       if (verifyError) {
-        setError(clerkError(verifyError));
+        const message = clerkError(verifyError);
+        if (/send a verification code/i.test(message)) {
+          await restartResetWithFreshCode();
+          return;
+        }
+        setError(message);
         return;
       }
       const { error: submitError } =
@@ -266,11 +330,16 @@ function SignInContent() {
         setError("Additional verification is required to sign in.");
       }
     } catch (err: unknown) {
-      setError(clerkError(err));
+      const message = clerkError(err);
+      if (/send a verification code/i.test(message)) {
+        await restartResetWithFreshCode();
+        return;
+      }
+      setError(message);
     } finally {
       setPwBusy(false);
     }
-  }, [signIn, resetCode, newPassword, finalizeSignIn]);
+  }, [signIn, resetCode, newPassword, finalizeSignIn, restartResetWithFreshCode]);
 
   const switchMode = useCallback(
     async (next: "otp" | "password") => {
@@ -310,17 +379,23 @@ function SignInContent() {
   }, [signIn]);
 
   const onGoogle = useCallback(async () => {
-    if (googleLoading) return;
+    if (ssoLoading) return;
     setError(null);
-    setGoogleLoading(true);
+    setSsoLoading("google");
     try {
+      // Switching from OTP/password to Google can leave a partial Clerk
+      // attempt behind. On Android that stale attempt can win when the custom
+      // tab returns, leaving the user back on the login screen.
+      if (signIn.status !== null) {
+        await signIn.reset();
+      }
       const { createdSessionId, setActive, signUp, authSessionResult } =
         await startSSOFlow({
           strategy: "oauth_google",
           redirectUrl: AuthSession.makeRedirectUri(),
         });
       let sessionId = createdSessionId;
-      // First-time Google users come back as an incomplete sign-up instead of
+      // First-time social users can come back as an incomplete sign-up instead of
       // a session. When nothing is actually missing, completing the sign-up
       // with an empty update yields the session (silently "going back" to the
       // login screen otherwise).
@@ -335,10 +410,11 @@ function SignInContent() {
       }
       if (sessionId && setActive) {
         exitGuest();
-        await setActive({
-          session: sessionId,
-          navigate: () => router.replace("/(tabs)"),
-        });
+        // Persist the active Clerk session before changing routes. This avoids
+        // the auth gate briefly seeing a signed-out user after Android resumes
+        // from Google's browser tab and redirecting back to login.
+        await setActive({ session: sessionId });
+        router.replace("/(tabs)");
       } else if (
         authSessionResult?.type !== "cancel" &&
         authSessionResult?.type !== "dismiss"
@@ -352,9 +428,53 @@ function SignInContent() {
     } catch (err: unknown) {
       setError(clerkError(err));
     } finally {
-      setGoogleLoading(false);
+      setSsoLoading(null);
     }
-  }, [googleLoading, startSSOFlow, router, exitGuest]);
+  }, [ssoLoading, signIn, startSSOFlow, router, exitGuest]);
+
+  const onApple = useCallback(async () => {
+    if (ssoLoading) return;
+    setError(null);
+    setSsoLoading("apple");
+    try {
+      // A partially started email/ticket attempt can remain in Clerk while the
+      // user switches methods. Native Apple sign-in must begin from a clean
+      // attempt or the token exchange can fail on the reviewer's device.
+      if (signIn.status !== null) {
+        await signIn.reset();
+      }
+      const { createdSessionId, setActive, signUp } =
+        await startAppleAuthenticationFlow();
+      let sessionId = createdSessionId;
+      if (
+        !sessionId &&
+        signUp &&
+        signUp.status === "missing_requirements" &&
+        (signUp.missingFields?.length ?? 0) === 0
+      ) {
+        const result = await signUp.update({});
+        if (result.status === "complete") sessionId = result.createdSessionId;
+      }
+      // The native hook returns no session when the user cancels.
+      if (!sessionId || !setActive) {
+        if (signUp?.status === "missing_requirements") {
+          setError(
+            "Apple sign-in needs additional account details. Please create your account with email, then connect Apple.",
+          );
+        }
+        return;
+      }
+      exitGuest();
+      await setActive({
+        session: sessionId,
+        navigate: () => router.replace("/(tabs)"),
+      });
+    } catch (err: unknown) {
+      if (!isAppleCancellation(err)) setError(clerkError(err));
+    } finally {
+      setSsoLoading(null);
+    }
+  }, [ssoLoading, signIn, startAppleAuthenticationFlow, router, exitGuest]);
 
   const onContinueWithoutLogin = useCallback(() => {
     enterGuest();
@@ -459,12 +579,11 @@ function SignInContent() {
                 {pwStage === "login" ? (
                   <>
                     <Field
-                      label="Mobile number"
-                      value={pwMobile}
-                      onChangeText={setPwMobile}
-                      placeholder="Gym-registered mobile number"
-                      keyboardType="phone-pad"
-                      autoComplete="tel"
+                      label="Username, email, or mobile"
+                      value={pwIdentifier}
+                      onChangeText={setPwIdentifier}
+                      placeholder="Your login identifier"
+                      autoCapitalize="none"
                     />
                     <Field
                       label="Password"
@@ -637,7 +756,7 @@ function SignInContent() {
             >
               <AppText weight="600" size={13} color={colors.primary}>
                 {mode === "otp"
-                  ? "Log in with mobile number & password"
+                  ? "Log in with username & password"
                   : "Log in with email code instead"}
               </AppText>
             </Pressable>
@@ -655,9 +774,19 @@ function SignInContent() {
               onPress={onGoogle}
               variant="secondary"
               icon="chrome"
-              loading={googleLoading}
+              loading={ssoLoading === "google"}
+              disabled={ssoLoading !== null}
               size="lg"
             />
+
+            {Platform.OS === "ios" ? (
+              <AppleSsoButton
+                onPress={onApple}
+                loading={ssoLoading === "apple"}
+                disabled={ssoLoading !== null}
+                tone="dark"
+              />
+            ) : null}
 
             {/* Footer */}
             <View style={styles.footer}>
@@ -714,6 +843,15 @@ function clerkError(err: unknown): string {
     e?.errors?.[0]?.message ??
     e?.message ??
     "Unable to sign in. Check your details."
+  );
+}
+
+function isAppleCancellation(err: unknown): boolean {
+  return (
+    typeof err === "object" &&
+    err !== null &&
+    "code" in err &&
+    err.code === "ERR_REQUEST_CANCELED"
   );
 }
 

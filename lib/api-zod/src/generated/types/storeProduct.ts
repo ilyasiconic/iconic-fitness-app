@@ -20,4 +20,6 @@ export interface StoreProduct {
   description?: string;
   sizes?: string[];
   colors?: string[];
+  cgstPercent?: number;
+  sgstPercent?: number;
 }

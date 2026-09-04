@@ -20,6 +20,8 @@ type Product = {
   colors?: string[];
   stock: number;
   status: string;
+  cgstPercent?: number;
+  sgstPercent?: number;
 };
 
 type Partner = { id: number; name: string; city: string; status: string };
@@ -41,6 +43,8 @@ type FormState = {
   colors: string;
   stock: number;
   status: string;
+  cgstPercent: number;
+  sgstPercent: number;
 };
 
 const blank = (): FormState => ({
@@ -57,6 +61,8 @@ const blank = (): FormState => ({
   colors: "",
   stock: 0,
   status: "active",
+  cgstPercent: 0,
+  sgstPercent: 0,
 });
 
 function toList(s: string): string[] {
@@ -74,6 +80,8 @@ export default function AdminProducts() {
   const [creating, setCreating] = useState(false);
   const [form, setForm] = useState<FormState>(blank());
   const [err, setErr] = useState<string | null>(null);
+  const [shipping, setShipping] = useState<number>(0);
+  const [shippingSaved, setShippingSaved] = useState(false);
 
   const load = () => {
     Promise.all([adminApi.products.list(), adminApi.partners.list()]).then(
@@ -86,7 +94,23 @@ export default function AdminProducts() {
   useEffect(load, []);
   useEffect(() => {
     storeApi.listCategories().then(setCategories).catch(() => setCategories([]));
+    adminApi.storeShipping
+      .get()
+      .then((r) => setShipping(r.shippingInr))
+      .catch(() => {});
   }, []);
+
+  const saveShipping = async () => {
+    setShippingSaved(false);
+    try {
+      const r = await adminApi.storeShipping.set(shipping);
+      setShipping(r.shippingInr);
+      setShippingSaved(true);
+      setTimeout(() => setShippingSaved(false), 2500);
+    } catch (e: any) {
+      setErr(e?.message ?? String(e));
+    }
+  };
 
   const startEdit = (p: Product) => {
     setEditing(p);
@@ -105,6 +129,8 @@ export default function AdminProducts() {
       colors: (p.colors ?? []).join(", "),
       stock: p.stock,
       status: p.status,
+      cgstPercent: p.cgstPercent ?? 0,
+      sgstPercent: p.sgstPercent ?? 0,
     });
     setErr(null);
   };
@@ -161,6 +187,36 @@ export default function AdminProducts() {
         </button>
       }
     >
+      <AdminCard className="p-4 mb-5">
+        <div className="flex flex-wrap items-end gap-3">
+          <label className="block">
+            <span className="text-xs text-slate-400">
+              Shipping charge per order (₹)
+            </span>
+            <input
+              type="number"
+              min={0}
+              value={shipping}
+              onChange={(e) => setShipping(Number(e.target.value))}
+              className={INPUT + " mt-1 w-40"}
+            />
+          </label>
+          <button
+            onClick={saveShipping}
+            className="px-4 py-2 rounded-lg bg-gradient-to-r from-lime-500 to-lime-600 text-white text-sm font-semibold"
+          >
+            Save shipping
+          </button>
+          {shippingSaved && (
+            <span className="text-xs text-emerald-400 pb-2.5">Saved ✓</span>
+          )}
+          <p className="text-[11px] text-slate-400 basis-full">
+            Added to every store order at checkout, on top of product prices and
+            GST. Set 0 for free shipping.
+          </p>
+        </div>
+      </AdminCard>
+
       {showForm && (
         <AdminCard className="p-5 mb-5">
           <div className="flex items-center justify-between mb-4">
@@ -266,6 +322,36 @@ export default function AdminProducts() {
                 value={form.stock}
                 onChange={(e) => setForm({ ...form, stock: Number(e.target.value) })}
                 className={INPUT + " mt-1"}
+              />
+            </label>
+            <label className="block">
+              <span className="text-xs text-slate-400">CGST %</span>
+              <input
+                type="number"
+                min={0}
+                max={50}
+                step={0.01}
+                value={form.cgstPercent}
+                onChange={(e) =>
+                  setForm({ ...form, cgstPercent: Number(e.target.value) })
+                }
+                className={INPUT + " mt-1"}
+                placeholder="e.g. 9"
+              />
+            </label>
+            <label className="block">
+              <span className="text-xs text-slate-400">SGST %</span>
+              <input
+                type="number"
+                min={0}
+                max={50}
+                step={0.01}
+                value={form.sgstPercent}
+                onChange={(e) =>
+                  setForm({ ...form, sgstPercent: Number(e.target.value) })
+                }
+                className={INPUT + " mt-1"}
+                placeholder="e.g. 9"
               />
             </label>
             <label className="block">

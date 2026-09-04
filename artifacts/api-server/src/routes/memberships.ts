@@ -192,23 +192,34 @@ router.post("/auth/password-login", async (req, res): Promise<void> => {
     .where(
       sql`right(regexp_replace(${usersTable.mobile}, '\\D', '', 'g'), 10) = ${last10} AND ${usersTable.clerkUserId} IS NOT NULL`,
     );
-  const matches = [...new Set(rows.map((r) => r.clerkUserId))];
-  // Fail closed on ambiguity — never guess between accounts sharing a number.
-  if (matches.length !== 1 || !matches[0]) {
+  const matches = [...new Set(rows.map((r) => r.clerkUserId))].filter(
+    (id): id is string => !!id,
+  );
+  if (matches.length === 0) {
     res.status(401).json({ error: GENERIC_LOGIN_ERROR });
     return;
   }
-  const clerkUserId = matches[0];
-  try {
-    await clerkClient.users.verifyPassword({
-      userId: clerkUserId,
-      password: parsed.password,
-    });
-  } catch {
-    // Wrong password, or the account has no password set yet.
+  // Several accounts can legitimately share a mobile number (e.g. a member
+  // signed up twice with different emails). The password disambiguates: only
+  // the account whose password actually matches gets signed in. If the
+  // password happens to match more than one account, fail closed.
+  const verified: string[] = [];
+  for (const candidate of matches.slice(0, 5)) {
+    try {
+      await clerkClient.users.verifyPassword({
+        userId: candidate,
+        password: parsed.password,
+      });
+      verified.push(candidate);
+    } catch {
+      // Wrong password for this account, or it has no password set.
+    }
+  }
+  if (verified.length !== 1) {
     res.status(401).json({ error: GENERIC_LOGIN_ERROR });
     return;
   }
+  const clerkUserId = verified[0];
   try {
     const token = await clerkClient.signInTokens.createSignInToken({
       userId: clerkUserId,

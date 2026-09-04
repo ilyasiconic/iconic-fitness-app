@@ -23,12 +23,12 @@ export function SectionHeader({
   const colors = useColors();
   return (
     <View style={styles.sectionHeader}>
-      <AppText weight="700" size={18}>
+      <AppText weight="700" size={20} style={{ letterSpacing: -0.5 }}>
         {title}
       </AppText>
       {action ? (
         <Pressable onPress={onAction} hitSlop={8}>
-          <AppText weight="600" size={13} color={colors.primary}>
+          <AppText weight="600" size={14} color={colors.primary}>
             {action}
           </AppText>
         </Pressable>
@@ -192,7 +192,8 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    marginBottom: 14,
+    marginTop: 8,
+    marginBottom: 16,
   },
   chipRow: { gap: 8, paddingVertical: 2, paddingRight: 8 },
   segment: { flexDirection: "row", padding: 4, gap: 4 },

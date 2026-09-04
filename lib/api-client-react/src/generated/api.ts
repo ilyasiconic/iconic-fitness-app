@@ -810,7 +810,7 @@ export const getStoreCheckoutUrl = () => {
 }
 
 /**
- * @summary Place a Cash-on-Delivery store order (guest or signed-in)
+ * @summary Start a store order with online payment (guest or signed-in)
  */
 export const storeCheckout = async (storeCheckoutRequest: StoreCheckoutRequest, options?: RequestInit): Promise<StoreCheckoutResponse> => {
 
@@ -859,7 +859,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type StoreCheckoutMutationError = ErrorType<void>
 
     /**
- * @summary Place a Cash-on-Delivery store order (guest or signed-in)
+ * @summary Start a store order with online payment (guest or signed-in)
  */
 export const useStoreCheckout = <TError = ErrorType<void>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof storeCheckout>>, TError,{data: BodyType<StoreCheckoutRequest>}, TContext>, request?: SecondParameter<typeof customFetch>}

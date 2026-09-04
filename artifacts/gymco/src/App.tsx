@@ -25,6 +25,7 @@ import TrainerDetail from "@/pages/TrainerDetail";
 import Wallet from "@/pages/Wallet";
 import Profile from "@/pages/Profile";
 import Invoices from "@/pages/Invoices";
+import Orders from "@/pages/Orders";
 import SignInPage from "@/pages/SignInPage";
 import SignUpPage from "@/pages/SignUpPage";
 
@@ -262,6 +263,7 @@ function MemberShellRoutes() {
         <Route path="/trainers/:trainerId" component={TrainerDetail} />
         <Route path="/wallet" component={Wallet} />
         <Route path="/invoices" component={Invoices} />
+        <Route path="/orders" component={Orders} />
         <Route path="/profile" component={Profile} />
         <Route path="/support" component={Support} />
         <Route path="/blog" component={Blog} />
@@ -440,12 +442,19 @@ function ScrollToTop() {
 function ClerkRouterBridge({ children }: { children: React.ReactNode }) {
   const [location, setLocation] = useLocation();
   // Partner portal is fully isolated from Clerk. Admin portal optionally uses
-  // Clerk only for Google sign-in on /admin/login + /admin/sso-callback; when
-  // no Clerk key is present, admin still works via the password form.
+  // Clerk only for Google sign-in on /admin/login + /admin/sso-callback.
+  // Keep authenticated admin pages outside Clerk so its async initialization
+  // cannot remount an open admin form (for example Change Username/Password).
+  const adminNeedsClerk =
+    location === "/admin/login" ||
+    location.startsWith("/admin/login/") ||
+    location === "/admin/sso-callback" ||
+    location.startsWith("/admin/sso-callback/");
   if (
     location.startsWith("/partner") ||
     location.startsWith("/vendor") ||
     location.startsWith("/staff") ||
+    (location.startsWith("/admin") && !adminNeedsClerk) ||
     !clerkPubKey
   ) {
     return <>{children}</>;

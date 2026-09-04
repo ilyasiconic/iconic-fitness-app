@@ -17,6 +17,7 @@ export const usersTable = pgTable(
   {
   id: serial("id").primaryKey(),
   clerkUserId: text("clerk_user_id").unique(),
+  username: text("username"),
   name: text("name").notNull(),
   email: text("email").notNull(),
   mobile: text("mobile").notNull(),
@@ -58,6 +59,9 @@ export const usersTable = pgTable(
   welcomeSmsSent: boolean("welcome_sms_sent").notNull().default(false),
   },
   (t) => [
+    uniqueIndex("users_username_lower_unique")
+      .on(sql`lower(${t.username})`)
+      .where(sql`${t.username} IS NOT NULL AND ${t.username} <> ''`),
     uniqueIndex("users_referral_code_unique")
       .on(t.referralCode)
       .where(sql`referral_code IS NOT NULL AND referral_code <> ''`),
@@ -201,6 +205,8 @@ export const trainerBookingsTable = pgTable("trainer_bookings", {
   couponId: integer("coupon_id").notNull().default(0),
   couponCode: text("coupon_code").notNull().default(""),
   couponDiscountInr: integer("coupon_discount_inr").notNull().default(0),
+  // Wallet points (₹) applied at booking time; debited at paid-flip.
+  pointsRedeemedInr: integer("points_redeemed_inr").notNull().default(0),
   // Package snapshot for the staff PT dashboard auto-enrol on payment.
   sessions: integer("sessions").notNull().default(0),
   durationDays: integer("duration_days").notNull().default(0),
@@ -924,6 +930,9 @@ export const productsTable = pgTable("products", {
   colors: text("colors").array().notNull().default([]),
   stock: integer("stock").notNull().default(0),
   status: text("status").notNull().default("active"),
+  // GST percentages applied on the sale price at checkout (e.g. 9 = 9%).
+  cgstPercent: real("cgst_percent").notNull().default(0),
+  sgstPercent: real("sgst_percent").notNull().default(0),
   createdAt: timestamp("created_at", { withTimezone: true })
     .notNull()
     .defaultNow(),
@@ -942,8 +951,28 @@ export const productOrdersTable = pgTable("product_orders", {
   // totalInr is the payable amount after the points discount.
   userId: integer("user_id").notNull().default(0),
   pointsRedeemedInr: integer("points_redeemed_inr").notNull().default(0),
+  // Invoice breakdown snapshot (₹, whole rupees), captured at checkout:
+  // totalInr = subtotal + cgst + sgst + shipping − points redeemed.
+  subtotalInr: integer("subtotal_inr").notNull().default(0),
+  cgstInr: integer("cgst_inr").notNull().default(0),
+  sgstInr: integer("sgst_inr").notNull().default(0),
+  shippingInr: integer("shipping_inr").notNull().default(0),
   paymentMethod: text("payment_method").notNull().default("cod"),
+  // payment_pending → placed (after online payment) | payment_failed;
+  // then the fulfillment lifecycle: placed/confirmed/shipped/delivered/cancelled.
   status: text("status").notNull().default("placed"),
+  // Online payment (Airpay): unguessable reference used as the gateway order
+  // id and in the return/landing URLs; '' for legacy COD rows.
+  token: text("token").notNull().default(""),
+  // Numeric gateway order id sent to Airpay (they reject non-numeric ids with
+  // "Merchant Transaction Id not valid"); regenerated on every payment attempt.
+  airpayOrderRef: text("airpay_order_ref").notNull().default(""),
+  airpayTxnId: text("airpay_txn_id").notNull().default(""),
+  // Online payment (Razorpay): gateway order id ("order_...") created once
+  // per order via the Orders API, and the settled payment id ("pay_...").
+  razorpayOrderId: text("razorpay_order_id").notNull().default(""),
+  razorpayPaymentId: text("razorpay_payment_id").notNull().default(""),
+  paidAt: timestamp("paid_at", { withTimezone: true }),
   createdAt: timestamp("created_at", { withTimezone: true })
     .notNull()
     .defaultNow(),
@@ -1010,6 +1039,10 @@ export const staffTable = pgTable("staff", {
   name: text("name").notNull(),
   email: text("email").notNull().unique(),
   username: text("username").unique(),
+  gymId: integer("gym_id").references(() => gymsTable.id, {
+    onDelete: "restrict",
+  }),
+  yoactivStaffId: text("yoactiv_staff_id").unique(),
   passwordHash: text("password_hash").notNull(),
   isActive: boolean("is_active").notNull().default(true),
   permissions: text("permissions")

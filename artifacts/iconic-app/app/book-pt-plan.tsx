@@ -3,6 +3,8 @@ import { Feather } from "@expo/vector-icons";
 import {
   getGetMeQueryKey,
   getGetMyPtProgramQueryKey,
+  getGetMyReferralInfoQueryKey,
+  useGetMyReferralInfo,
   getGetTrainerBookingQueryKey,
   getListTrainerPackagesQueryKey,
   useCreateTrainerBooking,
@@ -68,7 +70,15 @@ export default function BookPtPlanScreen() {
     return flagged.length > 0 ? flagged : all;
   }, [packagesQuery.data]);
 
+  const referralQuery = useGetMyReferralInfo({
+    query: {
+      enabled: isLoaded && !!isSignedIn,
+      queryKey: getGetMyReferralInfoQueryKey(),
+    },
+  });
+
   const [pkgId, setPkgId] = useState<number | null>(null);
+  const [usePoints, setUsePoints] = useState(false);
   const [busy, setBusy] = useState(false);
   const [bookingId, setBookingId] = useState<number | null>(null);
   const createBooking = useCreateTrainerBooking();
@@ -84,6 +94,12 @@ export default function BookPtPlanScreen() {
   const status = bookingId !== null ? statusQuery.data?.status : undefined;
 
   const selected = packages.find((p) => p.id === pkgId) ?? null;
+
+  // Wallet points redemption (1 point = ₹1); keep at least ₹1 payable.
+  const pointsAvailable = referralQuery.data?.balanceInr ?? 0;
+  const listPrice = selected?.amountInr ?? 0;
+  const pointsDiscount = Math.min(pointsAvailable, Math.max(listPrice - 1, 0));
+  const payable = usePoints ? listPrice - pointsDiscount : listPrice;
 
   // Once the payment lands, refresh the PT program so PT Details shows the
   // new plan (fires once on the pending → paid transition).
@@ -121,8 +137,16 @@ export default function BookPtPlanScreen() {
           name: me.name,
           mobile: me.mobile,
           preferredDate: istDateInNDays(1),
+          ...(usePoints && pointsDiscount > 0
+            ? { redeemPoints: pointsDiscount }
+            : {}),
         },
       });
+      if (usePoints) {
+        void queryClient.invalidateQueries({
+          queryKey: getGetMyReferralInfoQueryKey(),
+        });
+      }
       setBookingId(created.id);
       await openExternal(created.paymentUrl);
     } catch (err) {
@@ -220,10 +244,45 @@ export default function BookPtPlanScreen() {
               />
             ))}
           </View>
+          {pointsAvailable > 0 ? (
+            <Pressable
+              accessibilityRole="button"
+              onPress={() => setUsePoints((v) => !v)}
+              style={{
+                borderWidth: 1,
+                borderRadius: 12,
+                padding: 12,
+                marginBottom: 14,
+                flexDirection: "row",
+                alignItems: "center",
+                gap: 10,
+                borderColor: usePoints ? colors.primary : colors.border,
+                backgroundColor: usePoints
+                  ? `${colors.primary}14`
+                  : "transparent",
+              }}
+            >
+              <Feather
+                name={usePoints ? "check-square" : "square"}
+                size={18}
+                color={usePoints ? colors.primary : colors.mutedForeground}
+              />
+              <View style={{ flex: 1 }}>
+                <AppText weight="700" size={13}>
+                  Redeem wallet points
+                </AppText>
+                <AppText size={12} color={colors.mutedForeground}>
+                  {selected
+                    ? `Use ${pointsDiscount.toLocaleString("en-IN")} of your ${pointsAvailable.toLocaleString("en-IN")} points (₹1 each)`
+                    : `${pointsAvailable.toLocaleString("en-IN")} points available (₹1 each)`}
+                </AppText>
+              </View>
+            </Pressable>
+          ) : null}
           <Button
             label={
               selected
-                ? `Pay ₹${selected.amountInr.toLocaleString("en-IN")}`
+                ? `Pay ₹${payable.toLocaleString("en-IN")}`
                 : "Pay online"
             }
             onPress={onPay}

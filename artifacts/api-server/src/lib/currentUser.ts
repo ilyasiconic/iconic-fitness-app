@@ -2,6 +2,7 @@ import type { Request, Response, NextFunction, RequestHandler } from "express";
 import { getAuth, clerkClient } from "@clerk/express";
 import { eq } from "drizzle-orm";
 import { db, usersTable } from "@workspace/db";
+import { grantSignupBonus } from "./signupBonus";
 
 declare global {
   // eslint-disable-next-line @typescript-eslint/no-namespace
@@ -57,7 +58,13 @@ async function jitProvision(clerkUserId: string): Promise<number> {
     })
     .onConflictDoNothing({ target: usersTable.clerkUserId })
     .returning({ id: usersTable.id });
-  if (inserted[0]) return inserted[0].id;
+  if (inserted[0]) {
+    // Welcome (signup) bonus: admin-configurable points credited exactly once
+    // per new member — the (refType, refId) unique index makes this idempotent
+    // even if two first requests race. Best effort; never blocks login.
+    void grantSignupBonus(inserted[0].id);
+    return inserted[0].id;
+  }
 
   // Lost the race against a concurrent insert — re-select the winner.
   const [row] = await db

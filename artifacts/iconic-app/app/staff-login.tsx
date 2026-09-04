@@ -1,4 +1,5 @@
 import { useAuth, useSSO } from "@clerk/expo";
+import { useSignInWithApple } from "@clerk/expo/apple";
 import { Feather } from "@expo/vector-icons";
 import * as AuthSession from "expo-auth-session";
 import { LinearGradient } from "expo-linear-gradient";
@@ -9,6 +10,7 @@ import {
   Image,
   ImageBackground,
   KeyboardAvoidingView,
+  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -17,6 +19,7 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { AppText } from "@/components/AppText";
+import { AppleSsoButton } from "@/components/AppleSsoButton";
 import { Button } from "@/components/Button";
 import { Field } from "@/components/Field";
 import { useColors } from "@/hooks/useColors";
@@ -40,7 +43,7 @@ const FORCE_DARK = {
 
 /**
  * Studio (staff) login — lives at the ROOT of the router (not inside the
- * `(auth)` group) on purpose: the Google flow briefly creates a Clerk
+ * `(auth)` group) on purpose: social SSO briefly creates a Clerk
  * session to prove the trainer owns the Gmail account, and the `(auth)`
  * layout would instantly redirect any Clerk-signed-in user to the member
  * tabs. Here we exchange the Clerk session for a staff cookie session and
@@ -59,13 +62,14 @@ function StaffLoginContent() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const { startSSOFlow } = useSSO();
+  const { startAppleAuthenticationFlow } = useSignInWithApple();
   const { getToken, signOut } = useAuth();
 
   const [identifier, setIdentifier] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const [googleBusy, setGoogleBusy] = useState(false);
+  const [ssoBusy, setSsoBusy] = useState<"google" | "apple" | null>(null);
 
   const finishLogin = useCallback(
     async (profile: StaffProfile) => {
@@ -103,29 +107,81 @@ function StaffLoginContent() {
     }
   }, [identifier, password, finishLogin]);
 
-  const onGoogle = useCallback(async () => {
-    if (googleBusy) return;
+  const onSso = useCallback(async (provider: "google" | "apple") => {
+    if (ssoBusy) return;
+    const providerName = provider === "apple" ? "Apple" : "Google";
     setError(null);
-    setGoogleBusy(true);
+    setSsoBusy(provider);
     let clerkSessionCreated = false;
     try {
-      const { createdSessionId, setActive } = await startSSOFlow({
-        strategy: "oauth_google",
-        redirectUrl: AuthSession.makeRedirectUri(),
-      });
-      if (!createdSessionId || !setActive) {
-        return; // user dismissed the Google sheet
+      let sessionId: string | null = null;
+      let activateSession:
+        | ((params: { session: string }) => Promise<void>)
+        | undefined;
+
+      if (provider === "apple") {
+        const appleResult = await startAppleAuthenticationFlow();
+        sessionId = appleResult.createdSessionId;
+        activateSession = appleResult.setActive;
+        if (
+          !sessionId &&
+          appleResult.signUp &&
+          appleResult.signUp.status === "missing_requirements" &&
+          (appleResult.signUp.missingFields?.length ?? 0) === 0
+        ) {
+          const result = await appleResult.signUp.update({});
+          if (result.status === "complete") {
+            sessionId = result.createdSessionId;
+          }
+        }
+        // The native hook returns no session when the user cancels.
+        if (!sessionId || !activateSession) {
+          if (appleResult.signUp?.status === "missing_requirements") {
+            setError(
+              "Apple sign-in needs additional account details before this staff identity can be verified.",
+            );
+          }
+          return;
+        }
+      } else {
+        const { createdSessionId, setActive, signUp, authSessionResult } =
+          await startSSOFlow({
+            strategy: "oauth_google",
+            redirectUrl: AuthSession.makeRedirectUri(),
+          });
+        sessionId = createdSessionId;
+        activateSession = setActive;
+        if (
+          !sessionId &&
+          signUp &&
+          signUp.status === "missing_requirements" &&
+          (signUp.missingFields?.length ?? 0) === 0
+        ) {
+          const result = await signUp.update({});
+          if (result.status === "complete") {
+            sessionId = result.createdSessionId;
+          }
+        }
+        if (!sessionId || !activateSession) {
+          if (
+            authSessionResult?.type !== "cancel" &&
+            authSessionResult?.type !== "dismiss"
+          ) {
+            setError("Google sign-in didn't complete. Please try again.");
+          }
+          return;
+        }
       }
       // Activate the Clerk session only long enough to mint a token proving
-      // ownership of the Gmail address — we sign out again either way below.
-      await setActive({ session: createdSessionId });
+      // ownership of the verified email — we sign out again either way below.
+      await activateSession({ session: sessionId });
       clerkSessionCreated = true;
       const token = await getToken();
       if (!token) {
-        setError("Google sign-in didn't complete. Please try again.");
+        setError(`${providerName} sign-in didn't complete. Please try again.`);
         return;
       }
-      const res = await staffFetch("/staff/google-login", {
+      const res = await staffFetch("/staff/sso-login", {
         method: "POST",
         headers: { Authorization: `Bearer ${token}` },
       });
@@ -135,7 +191,7 @@ function StaffLoginContent() {
         } | null;
         setError(
           data?.error ??
-            "This Google account isn't registered as staff. Ask the admin to add your email.",
+            `This ${providerName} account isn't registered as staff. Ask the admin to add its verified email.`,
         );
         return;
       }
@@ -146,15 +202,24 @@ function StaffLoginContent() {
       await signOut();
       clerkSessionCreated = false;
       await finishLogin(profile);
-    } catch {
-      setError("Google sign-in failed. Please try again.");
+    } catch (err: unknown) {
+      if (!isAppleCancellation(err)) {
+        setError(`${providerName} sign-in failed. Please try again.`);
+      }
     } finally {
       if (clerkSessionCreated) {
         await signOut().catch(() => {});
       }
-      setGoogleBusy(false);
+      setSsoBusy(null);
     }
-  }, [googleBusy, startSSOFlow, getToken, signOut, finishLogin]);
+  }, [
+    ssoBusy,
+    startSSOFlow,
+    startAppleAuthenticationFlow,
+    getToken,
+    signOut,
+    finishLogin,
+  ]);
 
   const scrim = colors.background;
 
@@ -248,17 +313,27 @@ function StaffLoginContent() {
                   </View>
                 </View>
                 <AppText size={13} color={colors.mutedForeground}>
-                  For trainers, MCs and the studio team. Use the Gmail the
-                  admin registered for you, or your username and password.
+                  For trainers, MCs and the studio team. Use an account with
+                  the verified email the admin registered, or your credentials.
                 </AppText>
 
                 <Button
                   label="Continue with Google"
-                  onPress={onGoogle}
+                  onPress={() => void onSso("google")}
                   variant="secondary"
-                  loading={googleBusy}
+                  loading={ssoBusy === "google"}
+                  disabled={ssoBusy !== null}
                   size="lg"
                 />
+
+                {Platform.OS === "ios" ? (
+                  <AppleSsoButton
+                    onPress={() => void onSso("apple")}
+                    loading={ssoBusy === "apple"}
+                    disabled={ssoBusy !== null}
+                    tone="dark"
+                  />
+                ) : null}
 
                 <View style={styles.dividerRow}>
                   <View
@@ -329,6 +404,15 @@ function StaffLoginContent() {
         </ScrollView>
       </KeyboardAvoidingView>
     </View>
+  );
+}
+
+function isAppleCancellation(err: unknown): boolean {
+  return (
+    typeof err === "object" &&
+    err !== null &&
+    "code" in err &&
+    err.code === "ERR_REQUEST_CANCELED"
   );
 }
 

@@ -342,6 +342,17 @@ export function AdminLayout({
     );
   }
 
+  // The login redirect and this state update can land in separate renders.
+  // Never mount protected page children during that gap: their API requests
+  // would fail with an unhandled 401 and replace the page with an error overlay.
+  if (!admin) {
+    return (
+      <div className="theme-portal min-h-screen bg-lime-50 flex items-center justify-center text-slate-500">
+        Returning to admin login...
+      </div>
+    );
+  }
+
   return (
     <div className="theme-portal min-h-screen bg-lime-50/40 text-slate-900 lg:flex">
       {/* Mobile backdrop */}
